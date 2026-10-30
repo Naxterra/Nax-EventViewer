@@ -30,8 +30,9 @@ MinVersion=10.0.22000
 OutputDir=..\artifacts\installer
 OutputBaseFilename=Nax-EventViewer-{#AppVersion}-setup
 SetupIconFile=..\src\NaxEventViewer.App\Assets\Nax-EventViewer.ico
-; The license only grants rights and asks nothing of a user who just runs the app, so it is shown as information
-; with a Next button, not as an agreement to accept.
+; The license is shown for information with a Next button. Installing and running the app is what section 1 allows;
+; the restrictions in sections 2 to 7 apply through copyright, not through a click. Replace this line with
+; LicenseFile=..\LICENSE to make users accept the license before installing.
 InfoBeforeFile=..\LICENSE
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}

@@ -94,14 +94,18 @@ try {
     if (-not (Test-Path (Join-Path $installDir 'Assets\Nax-EventViewer.ico'))) { $problems += 'the icon file is missing' }
     $license = Join-Path $installDir 'LICENSE.txt'
     if (-not ((Test-Path $license) -and ((Get-Content $license -TotalCount 1) -match '^Nax Source-Available License'))) { $problems += 'the license text is missing' }
+    if (-not (Test-Path (Join-Path $installDir 'THIRD-PARTY-NOTICES.txt'))) { $problems += 'the third-party notices are missing' }
+    foreach ($notice in 'licenses\Microsoft.NETCore.App.Runtime.win-x64\LICENSE.TXT', 'licenses\Microsoft.NETCore.App.Runtime.win-x64\THIRD-PARTY-NOTICES.TXT', 'licenses\Microsoft.WindowsAppSDK\license.txt') {
+        if (-not (Test-Path (Join-Path $installDir $notice))) { $problems += "the bundled component notice $notice is missing" }
+    }
     if (-not (Test-Path $uninstallKey)) { $problems += 'there is no entry in Installed apps' }
     if (-not (Test-Path $shortcut)) { $problems += 'the Start menu shortcut is missing' }
     if (-not (Test-Path $desktopShortcut)) { $problems += 'the desktop shortcut is missing' }
     if (-not (OpenWithValuePresent)) { $problems += 'the Open with entry for .evtx files is missing' }
     $command = if (Test-Path "$progIdKey\shell\open\command") { (Get-Item "$progIdKey\shell\open\command").GetValue('') } else { '' }
     if ($command -notlike "*$installDir\Nax-EventViewer.exe*") { $problems += "the Open with command is wrong: $command" }
-    Report 'install_for_current_user_puts_program_license_shortcuts_and_open_with_entry_in_place' `
-        'A silent installation for the current user installs the program with its license text, the Start menu and desktop shortcuts, the Installed apps entry and the Open with entry for .evtx files.' $problems
+    Report 'install_for_current_user_puts_program_licenses_shortcuts_and_open_with_entry_in_place' `
+        'A silent installation for the current user installs the program with its license text and the license notices of the bundled .NET runtime and Windows App SDK, the Start menu and desktop shortcuts, the Installed apps entry and the Open with entry for .evtx files.' $problems
 
     $problems = @()
     if (-not (Test-Path (Join-Path $installDir 'coreclr.dll'))) { $problems += 'the .NET runtime (coreclr.dll) is not in the program folder' }
