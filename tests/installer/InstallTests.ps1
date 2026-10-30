@@ -108,8 +108,14 @@ try {
     $app = Start-InstalledApp
     if ($app.HasExited) { $problems += "the app ended at start with exit code $($app.ExitCode)" }
     elseif ($app.MainWindowHandle -eq 0) { $problems += 'the app showed no window within 45 seconds' }
-    Report 'installed_app_carries_its_own_dotnet_and_starts' `
-        'The installed program folder contains the .NET runtime, the app does not ask for a .NET installed on the PC, and it starts and shows its window.' $problems
+    else {
+        # The installer finds the running app through this mutex, so a normal process must be able to open it.
+        $mutex = $null
+        if ([Threading.Mutex]::TryOpenExisting('NaxEventViewer.Running', [ref]$mutex)) { $mutex.Dispose() }
+        else { $problems += 'the running app has no mutex that a normal process can open' }
+    }
+    Report 'installed_app_carries_its_own_dotnet_starts_and_can_be_seen_running' `
+        'The installed program folder contains the .NET runtime, the app does not ask for a .NET installed on the PC, it starts and shows its window, and a normal process can see through its mutex that it runs.' $problems
 
     # Uninstalling while the app runs must either refuse and leave the installation whole, or remove all of it.
     $problems = @()

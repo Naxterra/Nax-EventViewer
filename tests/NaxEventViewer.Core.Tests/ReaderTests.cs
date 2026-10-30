@@ -184,7 +184,7 @@ internal static class ReaderTests
             {
                 const string channel = "Microsoft-Windows-PowerShell/Operational";
                 using var arrived = new BlockingCollection<EventItem>();
-                using LiveSubscription live = LiveSubscription.Start(channel, NewestRecordId(channel), onlyFuture: false, new MessageStore(), arrived.Add, _ => { });
+                using LiveSubscription live = LiveSubscription.Start(channel, NewestBookmark(channel), fromOldest: false, new MessageStore(), arrived.Add, _ => { });
                 using var process = Process.Start(new ProcessStartInfo("powershell.exe", "-NoProfile -NonInteractive -Command exit") { UseShellExecute = false, CreateNoWindow = true })!;
                 uint pid = (uint)process.Id;
                 process.WaitForExit(30_000);
@@ -204,7 +204,7 @@ internal static class ReaderTests
             () =>
             {
                 string? reported = null;
-                using LiveSubscription live = LiveSubscription.Start("System", NewestRecordId("System"), onlyFuture: false, new MessageStore(), _ => { }, message => reported = message);
+                using LiveSubscription live = LiveSubscription.Start("System", NewestBookmark("System"), fromOldest: false, new MessageStore(), _ => { }, message => reported = message);
                 const int queryResultStale = 15011;
                 LiveSubscription.Dispatch(0, live.Id, queryResultStale);
                 Check.That(reported is not null && reported.StartsWith("Live updates for System stopped."), "the stop is reported: " + reported);
@@ -215,21 +215,64 @@ internal static class ReaderTests
             () =>
             {
                 using var arrived = new BlockingCollection<EventItem>();
-                using LiveSubscription live = LiveSubscription.Start("System", null, onlyFuture: false, new MessageStore(), arrived.Add, _ => { });
+                using LiveSubscription live = LiveSubscription.Start("System", null, fromOldest: true, new MessageStore(), arrived.Add, _ => { });
                 Check.That(arrived.TryTake(out EventItem? first, TimeSpan.FromSeconds(20)), "no existing System event arrived");
                 Check.That(first!.Channel == "System" && first.Log == "System", "the event belongs to System");
             });
 
-        yield return ("live_subscription_for_new_events_only_does_not_replay_the_log",
-            "Watching a log for new events only, as the window does for forwarded events, delivers no event that was already in the log when watching started.",
+        yield return ("live_subscription_from_the_read_bookmark_delivers_an_event_written_before_watching_started",
+            "An event that Windows writes after the log was read but before watching starts still arrives when watching starts from the bookmark of the read, and no event from the read arrives again.",
             () =>
             {
-                ulong newest = NewestRecordId("System") ?? throw new Exception("the System log is empty");
-                using var arrived = new BlockingCollection<EventItem>();
-                using LiveSubscription live = LiveSubscription.Start("System", null, onlyFuture: true, new MessageStore(), arrived.Add, _ => { });
-                Thread.Sleep(TimeSpan.FromSeconds(3));
-                EventItem? old = arrived.FirstOrDefault(i => i.RecordId <= newest);
-                Check.That(old is null, $"event {old?.RecordId}, which was already in the log, was delivered");
+                const string channel = "Microsoft-Windows-PowerShell/Operational";
+                var read = new HashSet<ulong>();
+                using var stop = new CancellationTokenSource();
+                ReadSummary summary = EventReader.ReadRecords(LogSource.ForChannel(channel), batch =>
+                {
+                    read.UnionWith(batch.Select(i => i.RecordId));
+                    stop.Cancel();
+                }, stop.Token);
+                Check.That(summary.NewestBookmark is not null, "the read gives a bookmark");
+
+                // The event is written completely before watching starts.
+                using (var process = Process.Start(new ProcessStartInfo("powershell.exe", "-NoProfile -NonInteractive -Command exit") { UseShellExecute = false, CreateNoWindow = true })!)
+                {
+                    uint pid = (uint)process.Id;
+                    process.WaitForExit(30_000);
+                    Thread.Sleep(TimeSpan.FromSeconds(2));
+
+                    using var arrived = new BlockingCollection<EventItem>();
+                    using LiveSubscription live = LiveSubscription.Start(channel, summary.NewestBookmark, fromOldest: false, new MessageStore(), arrived.Add, _ => { });
+                    var seen = new List<EventItem>();
+                    var deadline = Stopwatch.StartNew();
+                    while (!seen.Any(i => i.ProcessId == pid) && deadline.Elapsed < TimeSpan.FromSeconds(30))
+                    {
+                        if (arrived.TryTake(out EventItem? item, TimeSpan.FromSeconds(1))) seen.Add(item);
+                    }
+                    Check.That(seen.Any(i => i.ProcessId == pid), $"the event of PowerShell process {pid}, written before watching started, did not arrive");
+                    Check.That(!seen.Any(i => read.Contains(i.RecordId)), "an event that was already read arrived again");
+                }
+            });
+
+        yield return ("live_subscription_resumed_from_its_bookmark_continues_without_repeating_events",
+            "When watching stops and starts again from the bookmark the first subscription left, the second one continues after the last delivered event and repeats none of the events the first one delivered.",
+            () =>
+            {
+                var first = new List<EventItem>();
+                LiveSubscription live = LiveSubscription.Start("System", null, fromOldest: true, new MessageStore(), item => { lock (first) first.Add(item); }, _ => { });
+                Thread.Sleep(TimeSpan.FromSeconds(2));
+                live.Dispose();
+                string? resume = live.ResumeBookmark;
+                Check.That(first.Count > 0 && resume is not null, "the first subscription delivered events and left a bookmark");
+                var delivered = first.Select(i => i.RecordId).ToHashSet();
+
+                var second = new BlockingCollection<EventItem>();
+                using (LiveSubscription again = LiveSubscription.Start("System", resume, fromOldest: false, new MessageStore(), second.Add, _ => { }))
+                {
+                    Thread.Sleep(TimeSpan.FromSeconds(2));
+                }
+                EventItem? repeated = second.FirstOrDefault(i => delivered.Contains(i.RecordId));
+                Check.That(repeated is null, $"event {repeated?.RecordId} was delivered twice");
             });
 
         yield return ("missing_file_reports_a_problem_instead_of_failing",
@@ -243,16 +286,11 @@ internal static class ReaderTests
             });
     }
 
-    private static ulong? NewestRecordId(string channel)
+    /// <summary>The bookmark on the newest event of a log, read the way the window reads it.</summary>
+    private static string? NewestBookmark(string channel)
     {
-        ulong? newest = null;
         using var stop = new CancellationTokenSource();
-        EventReader.ReadRecords(LogSource.ForChannel(channel), batch =>
-        {
-            newest ??= batch.Max(i => i.RecordId);
-            stop.Cancel();
-        }, stop.Token);
-        return newest;
+        return EventReader.ReadRecords(LogSource.ForChannel(channel), _ => stop.Cancel(), stop.Token).NewestBookmark;
     }
 
     private static EventItem Copy(EventItem item, DateTime? timeUtc = null, string? computer = null, ushort? eventId = null) => new()

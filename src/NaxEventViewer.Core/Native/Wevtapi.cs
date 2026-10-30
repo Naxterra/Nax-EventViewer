@@ -34,6 +34,7 @@ internal static unsafe partial class Wevtapi
     public const int EvtRenderContextSystem = 1;
     public const int EvtRenderEventValues = 0;
     public const int EvtRenderEventXml = 1;
+    public const int EvtRenderBookmark = 2;
 
     // EVT_FORMAT_MESSAGE_FLAGS
     public const int EvtFormatMessageEvent = 1;
@@ -46,7 +47,6 @@ internal static unsafe partial class Wevtapi
     public const int EvtOpenChannelPath = 1;
     public const int EvtOpenFilePath = 2;
     public const int EvtLogNumberOfLogRecords = 5;
-    public const int EvtLogOldestRecordNumber = 6;
 
     // EVT_EVENT_PROPERTY_ID
     public const int EvtEventPath = 1;
@@ -139,6 +139,10 @@ internal static unsafe partial class Wevtapi
 
     [LibraryImport(Dll, SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     public static partial nint EvtCreateBookmark(string? bookmarkXml);
+
+    [LibraryImport(Dll, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool EvtUpdateBookmark(nint bookmark, nint evt);
 
     [LibraryImport(Dll, SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     public static partial nint EvtSubscribe(nint session, nint signalEvent, string? channelPath, string? query, nint bookmark, nint context, delegate* unmanaged<int, nint, nint, int> callback, int flags);

@@ -23,6 +23,15 @@ public sealed class ReadSummary
     /// <summary>True when the overview could open none of its logs, for example because they were locked or missing.</summary>
     public bool NoLogReadable { get; internal set; }
 
+    /// <summary>
+    /// For a single log, a Windows bookmark on the newest event read, as XML, or null when no event was read. Watching
+    /// the log from this bookmark misses no event written after the read.
+    /// </summary>
+    public string? NewestBookmark { get; internal set; }
+
+    /// <summary>False when the log could only be read oldest first, as analytic and debug logs are.</summary>
+    public bool NewestFirst { get; internal set; } = true;
+
     internal void AddLeftOut(string channel)
     {
         AccessDenied = true;
@@ -70,10 +79,19 @@ public static unsafe class EventReader
         }
         var strings = new StringPool();
         using var renderer = new SystemRenderer(strings);
+        using var newest = new Bookmark();
+        bool trackNewest = source.Kind == LogSourceKind.Channel;
         foreach (QueryPart part in source.Parts())
         {
-            ForEachBatch(part, summary, cancellation, (handles, count) =>
+            ForEachBatch(part, summary, cancellation, (handles, count, newestFirst) =>
             {
+                summary.NewestFirst = newestFirst;
+                if (trackNewest && count > 0)
+                {
+                    // Newest first: the first event of the first batch. Oldest first: the last event of each batch.
+                    if (!newestFirst) newest.MoveTo(handles[count - 1]);
+                    else if (summary.Count == 0) newest.MoveTo(handles[0]);
+                }
                 var batch = new List<EventItem>(count);
                 for (int i = 0; i < count; i++)
                 {
@@ -85,6 +103,7 @@ public static unsafe class EventReader
             });
             if (cancellation.IsCancellationRequested) break;
         }
+        if (trackNewest) summary.NewestBookmark = newest.ToXml();
         summary.Elapsed = watch.Elapsed;
         return summary;
     }
@@ -105,7 +124,7 @@ public static unsafe class EventReader
         var pending = new List<FormattedMessage>(MessageBatchSize);
         foreach (QueryPart part in source.Parts())
         {
-            ForEachBatch(part, summary, cancellation, (handles, count) =>
+            ForEachBatch(part, summary, cancellation, (handles, count, _) =>
             {
                 for (int i = 0; i < count && !cancellation.IsCancellationRequested; i++)
                 {
@@ -239,14 +258,16 @@ public static unsafe class EventReader
         && string.Equals(found.Computer, item.Computer, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Runs one query and calls <paramref name="onBatch"/> for each batch of event handles. The handles are closed
-    /// after the callback returns.
+    /// Runs one query and calls <paramref name="onBatch"/> for each batch of event handles, with whether the query
+    /// returns the newest events first. The handles are closed after the callback returns.
     /// </summary>
-    private static void ForEachBatch(QueryPart part, ReadSummary summary, CancellationToken cancellation, Action<nint[], int> onBatch)
+    private static void ForEachBatch(QueryPart part, ReadSummary summary, CancellationToken cancellation, Action<nint[], int, bool> onBatch)
     {
+        bool newestFirst = (part.Flags & Wevtapi.EvtQueryReverseDirection) != 0;
         nint query = Wevtapi.EvtQuery(0, part.Path, part.Query, part.Flags);
-        if (query == 0 && (part.Flags & Wevtapi.EvtQueryReverseDirection) != 0)
+        if (query == 0 && newestFirst)
         {
+            newestFirst = false;
             // Analytic and debug logs can only be read oldest first. The list sorts the events afterwards anyway.
             int reverseError = Marshal.GetLastPInvokeError();
             query = Wevtapi.EvtQuery(0, part.Path, part.Query, part.Flags & ~Wevtapi.EvtQueryReverseDirection);
@@ -279,7 +300,7 @@ public static unsafe class EventReader
                 }
                 try
                 {
-                    onBatch(handles, returned);
+                    onBatch(handles, returned, newestFirst);
                 }
                 finally
                 {

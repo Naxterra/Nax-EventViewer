@@ -1,7 +1,5 @@
 using System.Collections.Concurrent;
-using System.Globalization;
 using System.Runtime.InteropServices;
-using System.Security;
 using NaxEventViewer.Core.Native;
 
 namespace NaxEventViewer.Core;
@@ -24,9 +22,11 @@ public sealed unsafe class LiveSubscription : IDisposable
     private readonly SystemRenderer _renderer;
     private readonly MessageFormatter _formatter = new();
     private readonly MessageStore _store;
+    private readonly Bookmark _last = new();
     private readonly nint _id;
     private nint _subscription;
     private bool _disposed;
+    private string? _resumeAfterDispose;
 
     private LiveSubscription(string channel, MessageStore store, Action<EventItem> onEvent, Action<string> onError)
     {
@@ -39,28 +39,24 @@ public sealed unsafe class LiveSubscription : IDisposable
     }
 
     /// <summary>
-    /// Starts delivering events of <paramref name="channel"/> that come after record <paramref name="afterRecordId"/>.
-    /// When it is null, because the caller read no events, every event in the log is delivered, so an event written
-    /// between that read and this call is not lost. With <paramref name="onlyFuture"/>, only events written from now
-    /// on are delivered, for logs whose record numbers cannot serve as a bookmark. <paramref name="onError"/> receives a description when Windows ends the
-    /// subscription, for example because the log was cleared; no further events arrive after that.
+    /// Starts delivering events of <paramref name="channel"/> that come after the event <paramref name="afterBookmark"/>
+    /// points to, a bookmark from <see cref="ReadSummary.NewestBookmark"/> or <see cref="ResumeBookmark"/>, so no event
+    /// written since is lost. Without a bookmark, <paramref name="fromOldest"/> delivers every event in the log, which
+    /// is right when the caller read none; otherwise only events written from now on arrive. <paramref name="onError"/>
+    /// receives a description when Windows ends the subscription, for example because the log was cleared; no further
+    /// events arrive after that.
     /// </summary>
-    public static LiveSubscription Start(string channel, ulong? afterRecordId, bool onlyFuture, MessageStore store, Action<EventItem> onEvent, Action<string> onError)
+    public static LiveSubscription Start(string channel, string? afterBookmark, bool fromOldest, MessageStore store, Action<EventItem> onEvent, Action<string> onError)
     {
         var subscription = new LiveSubscription(channel, store, onEvent, onError);
         Active[subscription._id] = subscription;
 
-        nint bookmark = 0;
-        if (afterRecordId is ulong recordId && !onlyFuture)
-        {
-            string id = recordId.ToString(CultureInfo.InvariantCulture);
-            bookmark = Wevtapi.EvtCreateBookmark($"<BookmarkList><Bookmark Channel=\"{SecurityElement.Escape(channel)}\" RecordId=\"{id}\" IsCurrent=\"true\"/></BookmarkList>");
-        }
+        nint bookmark = afterBookmark is null ? 0 : Wevtapi.EvtCreateBookmark(afterBookmark);
         try
         {
             // No EvtSubscribeTolerateQueryErrors: for a single log it would turn a failure into a subscription that never delivers.
             int flags = bookmark != 0 ? Wevtapi.EvtSubscribeStartAfterBookmark
-                : afterRecordId is null && !onlyFuture ? Wevtapi.EvtSubscribeStartAtOldestRecord
+                : fromOldest ? Wevtapi.EvtSubscribeStartAtOldestRecord
                 : Wevtapi.EvtSubscribeToFutureEvents;
             subscription._subscription = Wevtapi.EvtSubscribe(0, 0, channel, "*", bookmark, subscription._id, &Callback, flags);
             if (subscription._subscription == 0)
@@ -92,6 +88,19 @@ public sealed unsafe class LiveSubscription : IDisposable
 
     internal nint Id => _id;
 
+    /// <summary>
+    /// A bookmark on the last event this subscription delivered, or null when it delivered none. Read it after
+    /// <see cref="Dispose"/>, when no further event can arrive: watching again from it continues exactly where this
+    /// subscription ended.
+    /// </summary>
+    public string? ResumeBookmark
+    {
+        get
+        {
+            lock (_gate) return _disposed ? _resumeAfterDispose : _last.ToXml();
+        }
+    }
+
     private void Fail(int error)
     {
         lock (_gate)
@@ -117,6 +126,7 @@ public sealed unsafe class LiveSubscription : IDisposable
             try
             {
                 item = _renderer.Render(evt, _channel);
+                _last.MoveTo(evt);
                 // Nobody listens to the new item yet, so setting the text here on the pool thread is safe.
                 item?.SetFormatted(_store.Add(_formatter.FormatMessage(evt, item)), _formatter.FormatTask(evt, item));
             }
@@ -148,8 +158,10 @@ public sealed unsafe class LiveSubscription : IDisposable
         {
             if (_disposed) return;
             _disposed = true;
+            _resumeAfterDispose = _last.ToXml();
             _renderer.Dispose();
             _formatter.Dispose();
+            _last.Dispose();
         }
     }
 }

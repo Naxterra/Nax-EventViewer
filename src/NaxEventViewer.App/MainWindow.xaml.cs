@@ -63,6 +63,10 @@ public sealed partial class MainWindow : Window
     private int _messagesFormatted;
     private int _missingMessages;
     private bool _idsInvalid;
+    // How many events at the start of _all came from reading the log, in which order, and where watching resumes.
+    private int _readCount;
+    private bool _readNewestFirst = true;
+    private string? _resumeBookmark;
     private TimeSpan _recordsElapsed;
     private EventItem? _detailItem;
     private EventDetail? _detail;
@@ -100,7 +104,7 @@ public sealed partial class MainWindow : Window
         {
             if (_timeWindow is not null) RequestRebuild(keepScroll: true);
             DropOverwrittenEvents();
-            Program.HoldRunningMutex();
+            RunningMutex.Hold();
         };
         _clockTimer.Start();
 
@@ -275,6 +279,8 @@ public sealed partial class MainWindow : Window
         _summary = null;
         _messagesFormatted = 0;
         _missingMessages = 0;
+        _readCount = 0;
+        _resumeBookmark = null;
         _recordsLoading = true;
         _messagesLoading = true;
         _loadWatch.Restart();
@@ -328,6 +334,9 @@ public sealed partial class MainWindow : Window
         _recordsLoading = false;
         _recordsElapsed = _loadWatch.Elapsed;
         _summary = summary;
+        _readCount = _all.Count;
+        _readNewestFirst = summary.NewestFirst;
+        _resumeBookmark = summary.NewestBookmark;
         RequestRebuild(keepScroll: true);
         if (summary.LeftOut.Count > 0)
             ShowProblem($"Windows only lets administrators read {string.Join(", ", summary.LeftOut)}, so {(summary.LeftOut.Count == 1 ? "that log is" : "those logs are")} not included.", offerAdmin: !_isElevated);
@@ -378,19 +387,16 @@ public sealed partial class MainWindow : Window
     private void StartLive()
     {
         if (_source is not { SupportsLiveUpdates: true } source || LiveToggle.IsChecked != true || _live is not null || _recordsLoading || _load is null) return;
-        ulong? newest = _all.Count == 0 ? null : _all.Max(i => i.RecordId);
-        // Record numbers of forwarded events belong to the PCs they came from, so no bookmark can be built from them.
-        // Such a log is watched for new events only.
-        bool onlyFuture = _all.Any(IsForwarded);
         CancellationToken token = _load.Token;
         DispatcherQueue queue = DispatcherQueue;
         ConcurrentQueue<EventItem> pending = _livePending;
         try
         {
             // New events collect in a queue and the tick adds them in one go, so a burst of thousands of events per
-            // second costs one list update per tick instead of one per event.
+            // second costs one list update per tick instead of one per event. Watching continues after the newest event
+            // this window has, so nothing written while the log was read or while Live was off is missed.
             LiveSubscription? subscription = null;
-            subscription = LiveSubscription.Start(source.Path, onlyFuture ? null : newest, onlyFuture, _messages,
+            subscription = LiveSubscription.Start(source.Path, _resumeBookmark, fromOldest: _all.Count == 0, _messages,
                 item =>
                 {
                     pending.Enqueue(item);
@@ -450,17 +456,20 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Removes events the watched log has overwritten since it was read. A log that overwrites old events keeps a fixed
-    /// size, so the list of a log watched for days then stays as large as the log instead of growing without limit.
+    /// Removes as many of the oldest events as the watched log has overwritten since it was read, so the list of a log
+    /// watched for days stays as large as the log instead of growing without limit. It compares counts, not record
+    /// numbers, because forwarded events carry the record numbers of the PCs they came from.
     /// </summary>
     private async void DropOverwrittenEvents()
     {
         if (_live is null || _source is not { Kind: LogSourceKind.Channel } source || _recordsLoading) return;
         int version = _loadVersion;
-        long? oldest;
+        // Events that arrive while Windows counts are in the log but not yet in this number, so the count errs on keeping events.
+        int listed = _all.Count;
+        long? inLog;
         try
         {
-            oldest = await Task.Run(() => ChannelCatalog.OldestRecord(source.Path));
+            inLog = await Task.Run(() => ChannelCatalog.CountRecords(source.Path));
         }
         catch (Exception ex)
         {
@@ -468,15 +477,18 @@ public sealed partial class MainWindow : Window
             return;
         }
         // A running rebuild remembers how many events it saw, so the list may only shrink between rebuilds.
-        if (oldest is not long first || first <= 0 || version != _loadVersion || _rebuildRunning) return;
-        // A forwarded event keeps the record number of the PC it came from, which says nothing about this log's
-        // oldest record, so only events that were written to this log itself are compared.
-        if (_all.RemoveAll(i => i.RecordId < (ulong)first && !IsForwarded(i)) == 0) return;
+        if (inLog is not long count || version != _loadVersion || _rebuildRunning) return;
+        int excess = (int)Math.Min(listed - count, listed);
+        if (excess <= 0) return;
+
+        // The oldest events are at the old end of the part that was read, then at the start of the live part.
+        int fromRead = Math.Min(excess, _readCount);
+        _all.RemoveRange(_readNewestFirst ? _readCount - fromRead : 0, fromRead);
+        _readCount -= fromRead;
+        _all.RemoveRange(_readCount, Math.Min(excess - fromRead, _all.Count - _readCount));
         if (!_messagesLoading) _missingMessages = _all.Count(i => !i.HasMessage);
         RequestRebuild(keepScroll: true);
     }
-
-    private static bool IsForwarded(EventItem item) => !string.Equals(item.Log, item.Channel, StringComparison.OrdinalIgnoreCase);
 
     private void LiveToggle_Click(object sender, RoutedEventArgs e)
     {
@@ -484,9 +496,11 @@ public sealed partial class MainWindow : Window
         {
             StartLive();
         }
-        else
+        else if (_live is not null)
         {
-            _live?.Dispose();
+            // Switching Live on again continues after the last event this subscription delivered.
+            _live.Dispose();
+            _resumeBookmark = _live.ResumeBookmark ?? _resumeBookmark;
             _live = null;
         }
         UpdateStatus();
