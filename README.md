@@ -15,7 +15,7 @@ Filtering and sorting run on the events in memory, so changing a filter is insta
 - Search across messages, sources, task categories and IDs, an event ID filter in the Windows Event Viewer syntax (such as `4624, 1000-1010, -4634`), a time filter and level buttons with counts.
 - New events appear as soon as Windows writes them (Live).
 - A detail pane with the full message, all fields, the user account and the event XML.
-- Saved .evtx files can be opened, the shown events can be saved as CSV, and a whole log can be saved as .evtx.
+- Saved .evtx files can be opened, the shown events can be saved as CSV, and a whole log can be saved as .evtx. In a CSV file, event text that would start a spreadsheet formula, at the start of a cell or after a semicolon, tab or line break, gets an apostrophe in front, so opening the file in Excel never runs it.
 - Ctrl+C copies the selected events. F5 reads the log again.
 
 The Security log and a few others can only be read by administrators. The app runs without administrator rights and offers to restart with them when a log needs it.
@@ -33,14 +33,14 @@ The test runner prints every test with its scenario and result. Its exit code is
 
 ## Installer
 
-The installer needs Inno Setup 7 (`winget install JRSoftware.InnoSetup.7`). The build script publishes the app as a self-contained x64 program and writes the installer to `artifacts\installer`.
+The installer needs Inno Setup 7 (`winget install JRSoftware.InnoSetup.7`). The build script publishes the app as a self-contained x64 program, which brings its own .NET runtime and Windows App SDK, and writes the installer to `artifacts\installer`.
 
 ```
 .\build-installer.ps1
 .\tests\installer\InstallTests.ps1
 ```
 
-The installer installs for the current user without administrator rights by default, and it can install for all users instead. It adds a Start menu shortcut, an optional desktop shortcut and, if chosen, an entry in the "Open with" menu of .evtx files, while the Windows Event Viewer stays the default program for them. Uninstalling removes all of this and offers to delete the crash log as well.
+The installer installs for the current user without administrator rights by default, and it can install for all users instead. It adds a Start menu shortcut, an optional desktop shortcut and, if chosen, an entry in the "Open with" menu of .evtx files, while the Windows Event Viewer stays the default program for them. Setup and uninstalling wait until the app is closed. Uninstalling removes all of this, removes log copies that an interrupted .evtx save left in the temporary folder, and offers to delete the crash log as well. Both of these live in the profile of the user who runs the uninstaller, so after an installation for all users, other users' crash logs in `%LOCALAPPDATA%\Nax-EventViewer` stay until they delete them.
 
 The installer test installs the app silently into a temporary folder, checks what was installed, uninstalls it and checks that nothing is left behind. It refuses to run while the app is installed for the current user.
 

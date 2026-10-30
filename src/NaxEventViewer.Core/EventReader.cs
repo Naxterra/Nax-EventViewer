@@ -77,7 +77,7 @@ public static unsafe class EventReader
                 var batch = new List<EventItem>(count);
                 for (int i = 0; i < count; i++)
                 {
-                    EventItem? item = renderer.Render(handles[i], part.Path ?? "");
+                    EventItem? item = renderer.Render(handles[i], part.Path);
                     if (item is not null) batch.Add(item);
                 }
                 summary.Count += batch.Count;
@@ -95,7 +95,7 @@ public static unsafe class EventReader
     /// </summary>
     public static void FormatMessages(LogSource source, IReadOnlyList<EventItem> items, MessageStore store, Action<IReadOnlyList<FormattedMessage>> onBatch, CancellationToken cancellation)
     {
-        var byKey = new Dictionary<(string, ulong), EventItem>(items.Count);
+        var byKey = new Dictionary<EventKey, EventItem>(items.Count);
         foreach (EventItem item in items) byKey.TryAdd(item.Key, item);
 
         var summary = new ReadSummary();
@@ -109,7 +109,7 @@ public static unsafe class EventReader
             {
                 for (int i = 0; i < count && !cancellation.IsCancellationRequested; i++)
                 {
-                    EventItem? rendered = renderer.Render(handles[i], part.Path ?? "");
+                    EventItem? rendered = renderer.Render(handles[i], part.Path);
                     if (rendered is null || !byKey.TryGetValue(rendered.Key, out EventItem? item) || item.HasMessage) continue;
                     pending.Add(new FormattedMessage(item, store.Add(formatter.FormatMessage(handles[i], item)), formatter.FormatTask(handles[i], item)));
                     if (pending.Count >= MessageBatchSize)
@@ -128,7 +128,8 @@ public static unsafe class EventReader
     public static EventDetail ReadDetail(LogSource source, EventItem item)
     {
         bool fromFile = source.Kind == LogSourceKind.File;
-        string path = fromFile ? source.Path : item.Channel;
+        // The log the event was read from, which for a forwarded event is ForwardedEvents and not the channel it names.
+        string path = fromFile ? source.Path : item.Log.Length > 0 ? item.Log : item.Channel;
         int flags = fromFile ? Wevtapi.EvtQueryFilePath : Wevtapi.EvtQueryChannelPath;
 
         nint evt = FindEvent(path, flags, item, out int error);
@@ -153,12 +154,14 @@ public static unsafe class EventReader
 
     /// <summary>
     /// Positions a query on the event through a bookmark, which is fast even in large logs, and falls back to an XPath
-    /// query on the record number when the bookmark does not lead to the right event.
+    /// query on the record number when the bookmark does not lead to the right event. Several events can share a
+    /// record number (forwarded events from different computers), so the fallback checks each of them.
     /// </summary>
     private static nint FindEvent(string path, int flags, EventItem item, out int error)
     {
         string recordId = item.RecordId.ToString(CultureInfo.InvariantCulture);
-        string bookmarkXml = $"<BookmarkList><Bookmark Channel=\"{SecurityElement.Escape(item.Channel)}\" RecordId=\"{recordId}\" IsCurrent=\"true\"/></BookmarkList>";
+        string bookmarkChannel = (flags & Wevtapi.EvtQueryFilePath) != 0 ? item.Channel : path;
+        string bookmarkXml = $"<BookmarkList><Bookmark Channel=\"{SecurityElement.Escape(bookmarkChannel)}\" RecordId=\"{recordId}\" IsCurrent=\"true\"/></BookmarkList>";
         nint bookmark = Wevtapi.EvtCreateBookmark(bookmarkXml);
         if (bookmark != 0)
         {
@@ -171,7 +174,7 @@ public static unsafe class EventReader
                     {
                         if (Wevtapi.EvtSeek(query, 0, bookmark, 0, Wevtapi.EvtSeekRelativeToBookmark))
                         {
-                            nint evt = NextIfMatches(query, item);
+                            nint evt = NextIfMatches(query, item, path, attempts: 1);
                             if (evt != 0)
                             {
                                 error = 0;
@@ -199,7 +202,7 @@ public static unsafe class EventReader
         }
         try
         {
-            nint evt = NextIfMatches(byId, item);
+            nint evt = NextIfMatches(byId, item, path, attempts: 1000);
             error = evt == 0 ? Wevtapi.ErrorNoMoreItems : 0;
             return evt;
         }
@@ -209,16 +212,31 @@ public static unsafe class EventReader
         }
     }
 
-    private static nint NextIfMatches(nint query, EventItem item)
+    /// <summary>
+    /// Returns the first of the next <paramref name="attempts"/> results that is the same event as <paramref name="item"/>,
+    /// or 0. Besides the record number, the time, ID, source, channel and computer must match, so an event in a log that
+    /// was cleared or a file that was replaced since the list was read is never shown in place of the selected one.
+    /// </summary>
+    private static nint NextIfMatches(nint query, EventItem item, string path, int attempts)
     {
-        nint evt;
-        if (!Wevtapi.EvtNext(query, 1, &evt, Wevtapi.Infinite, 0, out int returned) || returned != 1) return 0;
         using var renderer = new SystemRenderer(new StringPool());
-        EventItem? found = renderer.Render(evt, item.Channel);
-        if (found is not null && found.RecordId == item.RecordId && string.Equals(found.Channel, item.Channel, StringComparison.OrdinalIgnoreCase)) return evt;
-        Wevtapi.EvtClose(evt);
+        for (int i = 0; i < attempts; i++)
+        {
+            nint evt;
+            if (!Wevtapi.EvtNext(query, 1, &evt, Wevtapi.Infinite, 0, out int returned) || returned != 1) return 0;
+            if (renderer.Render(evt, path) is { } found && IsSameEvent(found, item)) return evt;
+            Wevtapi.EvtClose(evt);
+        }
         return 0;
     }
+
+    internal static bool IsSameEvent(EventItem found, EventItem item) =>
+        found.RecordId == item.RecordId
+        && found.TimeCreatedUtc == item.TimeCreatedUtc
+        && found.EventId == item.EventId
+        && string.Equals(found.Provider, item.Provider, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(found.Channel, item.Channel, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(found.Computer, item.Computer, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Runs one query and calls <paramref name="onBatch"/> for each batch of event handles. The handles are closed

@@ -65,6 +65,19 @@ namespace NaxEventViewer.Core.Tests
         /// <summary>A saved copy of the Application log, so tests read a file that cannot change under them.</summary>
         public static string ApplicationLogFile => ApplicationCopy.Value;
 
+        /// <summary>The folder that holds NaxEventViewer.slnx, found by walking up from the test program.</summary>
+        public static string RepositoryRoot
+        {
+            get
+            {
+                for (DirectoryInfo? folder = new(AppContext.BaseDirectory); folder is not null; folder = folder.Parent)
+                {
+                    if (File.Exists(Path.Combine(folder.FullName, "NaxEventViewer.slnx"))) return folder.FullName;
+                }
+                throw new Exception("NaxEventViewer.slnx was not found above the test program.");
+            }
+        }
+
         public static string TempFolder(string name)
         {
             string folder = Path.Combine(Root, name + "-" + Guid.NewGuid().ToString("N")[..8]);

@@ -39,8 +39,9 @@ public sealed unsafe class LiveSubscription : IDisposable
     }
 
     /// <summary>
-    /// Starts delivering events of <paramref name="channel"/> that come after record <paramref name="afterRecordId"/>,
-    /// or only future events when it is null. <paramref name="onError"/> receives a description when Windows ends the
+    /// Starts delivering events of <paramref name="channel"/> that come after record <paramref name="afterRecordId"/>.
+    /// When it is null, because the caller read no events, every event in the log is delivered, so an event written
+    /// between that read and this call is not lost. <paramref name="onError"/> receives a description when Windows ends the
     /// subscription, for example because the log was cleared; no further events arrive after that.
     /// </summary>
     public static LiveSubscription Start(string channel, ulong? afterRecordId, MessageStore store, Action<EventItem> onEvent, Action<string> onError)
@@ -57,7 +58,9 @@ public sealed unsafe class LiveSubscription : IDisposable
         try
         {
             // No EvtSubscribeTolerateQueryErrors: for a single log it would turn a failure into a subscription that never delivers.
-            int flags = bookmark != 0 ? Wevtapi.EvtSubscribeStartAfterBookmark : Wevtapi.EvtSubscribeToFutureEvents;
+            int flags = bookmark != 0 ? Wevtapi.EvtSubscribeStartAfterBookmark
+                : afterRecordId is null ? Wevtapi.EvtSubscribeStartAtOldestRecord
+                : Wevtapi.EvtSubscribeToFutureEvents;
             subscription._subscription = Wevtapi.EvtSubscribe(0, 0, channel, "*", bookmark, subscription._id, &Callback, flags);
             if (subscription._subscription == 0)
             {

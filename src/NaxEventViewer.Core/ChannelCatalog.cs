@@ -85,14 +85,22 @@ public static unsafe class ChannelCatalog
     }
 
     /// <summary>Returns the number of events in a log or .evtx file, or null when Windows cannot open it.</summary>
-    public static long? CountRecords(string path, bool isFile = false)
+    public static long? CountRecords(string path, bool isFile = false) => ReadLogNumber(path, isFile, Wevtapi.EvtLogNumberOfLogRecords);
+
+    /// <summary>
+    /// Returns the record number of the oldest event still in a log, or null when Windows cannot tell. A log that
+    /// overwrites old events moves this number up, so events below it are gone from the log.
+    /// </summary>
+    public static long? OldestRecord(string channel) => ReadLogNumber(channel, isFile: false, Wevtapi.EvtLogOldestRecordNumber);
+
+    private static long? ReadLogNumber(string path, bool isFile, int property)
     {
         nint log = Wevtapi.EvtOpenLog(0, path, isFile ? Wevtapi.EvtOpenFilePath : Wevtapi.EvtOpenChannelPath);
         if (log == 0) return null;
         try
         {
             EvtVariant value;
-            if (!Wevtapi.EvtGetLogInfo(log, Wevtapi.EvtLogNumberOfLogRecords, sizeof(EvtVariant), &value, out _)) return null;
+            if (!Wevtapi.EvtGetLogInfo(log, property, sizeof(EvtVariant), &value, out _)) return null;
             return value.BaseType == Wevtapi.EvtVarTypeUInt64 ? (long)value.UInt64 : null;
         }
         finally

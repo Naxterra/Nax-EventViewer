@@ -37,6 +37,9 @@ SolidCompression=yes
 WizardStyle=modern
 ChangesAssociations=yes
 CloseApplications=yes
+; The app holds this mutex while it runs. Setup and the uninstaller refuse to go on until it is closed, so no locked
+; program file is left behind.
+AppMutex=NaxEventViewer.Running
 
 [Tasks]
 Name: "openwith"; Description: "Offer {#AppName} in the ""Open with"" menu of .evtx files (Windows Event Viewer stays the default)"
@@ -58,6 +61,10 @@ Root: HKA; Subkey: "Software\Classes\.evtx\OpenWithProgids"; ValueType: string; 
 Root: HKA; Subkey: "Software\Classes\{#ProgId}"; ValueType: string; ValueName: ""; ValueData: "Event log file"; Flags: uninsdeletekey; Tasks: openwith
 Root: HKA; Subkey: "Software\Classes\{#ProgId}\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExe},0"; Tasks: openwith
 Root: HKA; Subkey: "Software\Classes\{#ProgId}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; Tasks: openwith
+
+[UninstallDelete]
+; Copies of a whole log that a save interrupted by a crash left in the temporary folder of the user who uninstalls.
+Type: files; Name: "{%TEMP}\nax-eventviewer-export-*.evtx"
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "Start {#AppName}"; Flags: nowait postinstall skipifsilent

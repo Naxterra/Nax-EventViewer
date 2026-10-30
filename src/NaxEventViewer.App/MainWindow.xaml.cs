@@ -61,6 +61,8 @@ public sealed partial class MainWindow : Window
     private bool _recordsLoading;
     private bool _messagesLoading;
     private int _messagesFormatted;
+    private int _missingMessages;
+    private bool _idsInvalid;
     private TimeSpan _recordsElapsed;
     private EventItem? _detailItem;
     private EventDetail? _detail;
@@ -91,12 +93,13 @@ public sealed partial class MainWindow : Window
         _filterDelay.Interval = TimeSpan.FromMilliseconds(200);
         _filterDelay.IsRepeating = false;
         _filterDelay.Tick += (_, _) => ApplyFilter();
-        // A "last hour" filter moves along with the clock.
+        // A "last hour" filter moves along with the clock, and a watched log drops events the log itself overwrote.
         _clockTimer = DispatcherQueue.CreateTimer();
         _clockTimer.Interval = TimeSpan.FromMinutes(1);
         _clockTimer.Tick += (_, _) =>
         {
             if (_timeWindow is not null) RequestRebuild(keepScroll: true);
+            DropOverwrittenEvents();
         };
         _clockTimer.Start();
 
@@ -241,7 +244,15 @@ public sealed partial class MainWindow : Window
             _roots.Add(_filesFolder);
         }
         if (!_filesFolder.Children.Any(n => string.Equals(n.Path, source.Path, StringComparison.OrdinalIgnoreCase)))
-            _filesFolder.Children.Add(new LogNode(LogNodeKind.File, source.DisplayName, source.Path) { CountText = LogNode.FormatCount(ChannelCatalog.CountRecords(source.Path, isFile: true)) });
+        {
+            var node = new LogNode(LogNodeKind.File, source.DisplayName, source.Path);
+            _filesFolder.Children.Add(node);
+            // Counting opens the file, which can take a while on a slow network share, so it runs off the UI thread.
+            Task.Run(() => ChannelCatalog.CountRecords(source.Path, isFile: true)).ContinueWith(task =>
+            {
+                if (task.IsCompletedSuccessfully) DispatcherQueue.TryEnqueue(() => node.CountText = LogNode.FormatCount(task.Result));
+            });
+        }
         Open(source);
     }
 
@@ -262,6 +273,7 @@ public sealed partial class MainWindow : Window
         ProblemBar.IsOpen = false;
         _summary = null;
         _messagesFormatted = 0;
+        _missingMessages = 0;
         _recordsLoading = true;
         _messagesLoading = true;
         _loadWatch.Restart();
@@ -286,6 +298,7 @@ public sealed partial class MainWindow : Window
             RecordsDone = summary => Post(() => OnRecordsDone(summary)),
             MessagesFormatted = batch => Post(() => OnMessagesFormatted(batch)),
             MessagesDone = () => Post(OnMessagesDone),
+            UnexpectedError = CrashLog.Write,
         }, token);
         _tick.Start();
         UpdateStatus();
@@ -343,6 +356,8 @@ public sealed partial class MainWindow : Window
     private void OnMessagesDone()
     {
         _messagesLoading = false;
+        // Events the message pass could not reach, for example because they left the log meanwhile, are named in the status bar.
+        _missingMessages = _all.Count(i => !i.HasMessage);
         if (_viewDirty) RequestRebuild(keepScroll: true);
         UpdateStatus();
     }
@@ -430,6 +445,29 @@ public sealed partial class MainWindow : Window
         UpdateStatus();
     }
 
+    /// <summary>
+    /// Removes events the watched log has overwritten since it was read. A log that overwrites old events keeps a fixed
+    /// size, so the list of a log watched for days then stays as large as the log instead of growing without limit.
+    /// </summary>
+    private async void DropOverwrittenEvents()
+    {
+        if (_live is null || _source is not { Kind: LogSourceKind.Channel } source || _recordsLoading) return;
+        int version = _loadVersion;
+        long? oldest;
+        try
+        {
+            oldest = await Task.Run(() => ChannelCatalog.OldestRecord(source.Path));
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write(ex);
+            return;
+        }
+        // A running rebuild remembers how many events it saw, so the list may only shrink between rebuilds.
+        if (oldest is not long first || first <= 0 || version != _loadVersion || _rebuildRunning) return;
+        if (_all.RemoveAll(i => i.RecordId < (ulong)first) > 0) RequestRebuild(keepScroll: true);
+    }
+
     private void LiveToggle_Click(object sender, RoutedEventArgs e)
     {
         if (LiveToggle.IsChecked == true)
@@ -500,9 +538,12 @@ public sealed partial class MainWindow : Window
     {
         _filterDelay.Stop();
         bool idsValid = EventIdFilter.TryParse(EventIdBox.Text, out EventIdFilter? ids);
+        // An invalid list shows nothing rather than everything, so a typo is never mistaken for a working filter.
+        _idsInvalid = !idsValid;
+        if (!idsValid) ids = EventIdFilter.Nothing;
         ToolTipService.SetToolTip(EventIdBox, idsValid
             ? "IDs and ranges separated by commas, such as 4624, 1000-1010. A minus sign excludes an ID."
-            : "This is not a valid list of event IDs, so it is ignored. Use IDs and ranges separated by commas, such as 4624, 1000-1010, -7036.");
+            : "This is not a valid list of event IDs, so no events are shown. Use IDs and ranges separated by commas, such as 4624, 1000-1010, -7036.");
         if (idsValid) EventIdBox.ClearValue(Control.BorderBrushProperty);
         else EventIdBox.BorderBrush = LevelVisuals.Brush(EventLevelKind.Error);
 
@@ -659,7 +700,8 @@ public sealed partial class MainWindow : Window
         bool someLeftOut = _summary is { LeftOut.Count: > 0 };
         bool unreadable = _summary is { Count: 0 } summary
             && (summary.Problems.Count > 0 || summary.NoLogReadable || (summary.AccessDenied && !someLeftOut));
-        EmptyText.Text = _all.Count > 0 ? "No events match the filter."
+        EmptyText.Text = _all.Count > 0
+                ? _idsInvalid ? "The event ID list is not valid, so no events are shown. Use IDs and ranges such as 4624, 1000-1010." : "No events match the filter."
             : _summary is { NoLogReadable: true } ? "None of these logs could be opened."
             : unreadable ? "This log could not be read. The message above says why."
             : _source?.Kind == LogSourceKind.ProblemsOverview
@@ -696,6 +738,9 @@ public sealed partial class MainWindow : Window
             status.Append("Showing ").Append(count(_view.Count)).Append(" of ").Append(count(_all.Count)).Append(" events. ");
             status.Append("Read in ").Append(_recordsElapsed.TotalSeconds.ToString("0.00", CultureInfo.CurrentCulture)).Append(" s.");
             if (_live is not null) status.Append(" Watching for new events.");
+            if (_missingMessages > 0 && !_messagesLoading)
+                status.Append(' ').Append(count(_missingMessages)).Append(_missingMessages == 1 ? " event has" : " events have")
+                    .Append(" no message, so a search cannot find words in their message.");
         }
         StatusText.Text = status.ToString();
 
@@ -765,7 +810,11 @@ public sealed partial class MainWindow : Window
         if (version != _detailVersion) return;
 
         _detail = detail;
-        if (!item.HasMessage && detail.Message is not null) item.SetFormatted(detail.Message, detail.TaskName);
+        if (!item.HasMessage && detail.Message is not null)
+        {
+            item.SetFormatted(detail.Message, detail.TaskName);
+            if (!_messagesLoading && _missingMessages > 0) _missingMessages--;
+        }
         MessageText.Text = item.Message ?? detail.Error ?? "";
         XmlText.Text = xml ?? detail.Error ?? "";
         FillFields(item, detail, user);
@@ -847,18 +896,38 @@ public sealed partial class MainWindow : Window
 
     // ----- Copy, open, save -----
 
-    private void EventList_KeyDown(object sender, KeyRoutedEventArgs e)
+    private async void EventList_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         bool control = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
         if (!control || e.Key != VirtualKey.C) return;
-        var selected = EventList.SelectedItems.OfType<EventItem>().ToHashSet();
-        if (selected.Count == 0) return;
-        var text = new StringBuilder();
-        foreach (EventItem item in _view.Where(selected.Contains))
-            text.Append(item.LevelText).Append('\t').Append(item.TimeText).Append('\t').Append(item.Provider).Append('\t')
-                .Append(item.EventIdText).Append('\t').Append(item.TaskName).Append('\t').Append(item.MessagePreview).Append("\r\n");
-        CopyText(text.ToString());
         e.Handled = true;
+        try
+        {
+            // The selected ranges are cheap to read even when a million rows are selected; the text is built off the UI thread.
+            EventItem[] view = [.. _view];
+            var ranges = EventList.SelectedRanges.Select(r => (r.FirstIndex, r.LastIndex)).ToArray();
+            string text = await Task.Run(() =>
+            {
+                var builder = new StringBuilder();
+                foreach (var (first, last) in ranges.OrderBy(r => r.FirstIndex))
+                {
+                    for (int i = Math.Max(0, first); i <= last && i < view.Length; i++)
+                    {
+                        EventItem item = view[i];
+                        builder.Append(item.LevelText).Append('\t').Append(item.TimeText).Append('\t').Append(item.Provider).Append('\t')
+                            .Append(item.EventIdText).Append('\t').Append(item.TaskName).Append('\t').Append(item.MessagePreview).Append("\r\n");
+                    }
+                }
+                return builder.ToString();
+            });
+            if (text.Length > 0) CopyText(text);
+        }
+        catch (Exception ex)
+        {
+            // This is an async void handler, so an exception that escaped here would end the app.
+            CrashLog.Write(ex);
+            ShowProblem($"The events could not be copied. {ex.Message}", offerAdmin: false);
+        }
     }
 
     private void CopyDetail_Click(object sender, RoutedEventArgs e)
@@ -913,12 +982,35 @@ public sealed partial class MainWindow : Window
         try
         {
             if (_source is null) return;
+            // While records are still arriving, the list is incomplete, and saving it would claim a complete file.
+            const string stillReading = "The log is still being read. Save it once every event has been read.";
+            if (_recordsLoading)
+            {
+                ShowProblem(stillReading, offerAdmin: false);
+                return;
+            }
+            int version = _loadVersion;
             string path = await PickSavePath("CSV file", ".csv", "-events");
             if (path.Length == 0) return;
-            List<EventItem> items = [.. _view];
-            int missing = items.Count(i => !i.HasMessage);
-            await RunSave(() => EventExport.SaveCsv(path, items), path,
-                missing > 0 ? $" {missing.ToString("N0", CultureInfo.CurrentCulture)} events had no message loaded yet, so their message column is empty." : "");
+            if (version != _loadVersion || _recordsLoading)
+            {
+                ShowProblem(_recordsLoading ? stillReading : "Another log was opened while the save dialog was open, so nothing was saved.", offerAdmin: false);
+                return;
+            }
+
+            // The list on screen can lag behind the events by up to a second, so the file is built from all events
+            // with the current filter and sort order, the same way the list is.
+            EventItem[] snapshot = [.. _all];
+            EventFilter filter = _timeWindow is TimeSpan window ? _filter.WithSince(DateTime.UtcNow - window) : _filter;
+            EventComparer comparer = _comparer;
+            await RunSave(() =>
+            {
+                List<EventItem> items = EventView.FilterAndSort(snapshot, filter, comparer).Shown;
+                int missing = items.Count(i => !i.HasMessage);
+                int saved = EventExport.SaveCsv(path, items);
+                string note = missing > 0 ? $" {missing.ToString("N0", CultureInfo.CurrentCulture)} of them had no message loaded yet, so their message column is empty." : "";
+                return $"Saved {saved.ToString("N0", CultureInfo.CurrentCulture)} events to {path}.{note}";
+            });
         }
         catch (Exception ex)
         {
@@ -934,7 +1026,11 @@ public sealed partial class MainWindow : Window
             if (_source is not { SupportsEvtxExport: true } source) return;
             string path = await PickSavePath("Event log file", ".evtx", "");
             if (path.Length == 0) return;
-            await RunSave(() => EventExport.SaveEvtx(source, path), path, "");
+            await RunSave(() =>
+            {
+                EventExport.SaveEvtx(source, path);
+                return $"Saved {path}.";
+            });
         }
         catch (Exception ex)
         {
@@ -945,7 +1041,8 @@ public sealed partial class MainWindow : Window
 
     private async Task<string> PickSavePath(string typeName, string extension, string suffix)
     {
-        string baseName = string.Concat((_source?.DisplayName ?? "events").Split(Path.GetInvalidFileNameChars())).Replace('/', '-');
+        // "Microsoft-Windows-PowerShell/Operational" becomes "Microsoft-Windows-PowerShell-Operational".
+        string baseName = string.Concat((_source?.DisplayName ?? "events").Replace('/', '-').Split(Path.GetInvalidFileNameChars()));
         if (baseName.EndsWith(extension, StringComparison.OrdinalIgnoreCase)) baseName = baseName[..^extension.Length];
         var picker = new FileSavePicker(AppWindow.Id)
         {
@@ -957,18 +1054,24 @@ public sealed partial class MainWindow : Window
         return result?.Path ?? "";
     }
 
-    private async Task RunSave(Action save, string path, string note)
+    /// <summary>Runs a save off the UI thread and shows the message it returns, or why it failed.</summary>
+    private async Task RunSave(Func<string> save)
     {
         try
         {
-            await Task.Run(save);
+            string message = await Task.Run(save);
             ProblemBar.Severity = InfoBarSeverity.Success;
-            ProblemBar.Message = $"Saved {path}.{note}";
+            ProblemBar.Message = message;
             ProblemAdminButton.Visibility = Visibility.Collapsed;
             ProblemBar.IsOpen = true;
         }
         catch (Exception ex)
         {
+            if (ex is NothingToSaveException)
+            {
+                ShowProblem($"Nothing was saved. {ex.Message}", offerAdmin: false);
+                return;
+            }
             if (ex is not (IOException or UnauthorizedAccessException or EventLogException)) CrashLog.Write(ex);
             ShowProblem($"The file could not be saved. {ex.Message}", offerAdmin: false);
         }

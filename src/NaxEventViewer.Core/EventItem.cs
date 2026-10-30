@@ -36,6 +36,8 @@ public sealed class EventItem : INotifyPropertyChanged
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
+    /// <summary>The log or .evtx file the event was read from. It differs from <see cref="Channel"/> for forwarded events.</summary>
+    public string Log { get; init; } = "";
     public required string Channel { get; init; }
     public required string Provider { get; init; }
     public string Computer { get; init; } = "";
@@ -171,8 +173,27 @@ public sealed class EventItem : INotifyPropertyChanged
         return builder.ToString();
     }
 
-    /// <summary>The key that identifies an event within one query result (record numbers are unique per log).</summary>
-    public (string Channel, ulong RecordId) Key => (Channel, RecordId);
+    /// <summary>
+    /// The key that identifies an event within one read. Forwarded events keep the record number, channel and computer
+    /// of the PC they came from, so all four parts are needed to tell them apart.
+    /// </summary>
+    public EventKey Key => new(Log, Channel, Computer, RecordId);
+}
+
+/// <summary>Identifies one event within one read. Log, channel and computer names compare ignoring case.</summary>
+public readonly record struct EventKey(string Log, string Channel, string Computer, ulong RecordId)
+{
+    public bool Equals(EventKey other) =>
+        RecordId == other.RecordId
+        && string.Equals(Log, other.Log, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(Channel, other.Channel, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(Computer, other.Computer, StringComparison.OrdinalIgnoreCase);
+
+    public override int GetHashCode() => HashCode.Combine(
+        RecordId,
+        StringComparer.OrdinalIgnoreCase.GetHashCode(Log),
+        StringComparer.OrdinalIgnoreCase.GetHashCode(Channel),
+        StringComparer.OrdinalIgnoreCase.GetHashCode(Computer));
 }
 
 /// <summary>The formatted text the background pass found for one event.</summary>

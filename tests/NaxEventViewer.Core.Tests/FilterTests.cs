@@ -37,6 +37,25 @@ internal static class FilterTests
                 Check.That(EventIdFilter.TryParse("  ", out EventIdFilter? none) && none is null, "empty text is no filter");
             });
 
+        yield return ("event_id_filter_accepts_dashes_from_autocorrect",
+            "A range typed with an en dash, an em dash or a minus sign, as autocorrect often writes it, works like one typed with a hyphen.",
+            () =>
+            {
+                foreach (string text in new[] { "1000–1010", "1000—1010", "1000−1010", "–1005" })
+                    Check.That(EventIdFilter.TryParse(text, out EventIdFilter? filter) && filter is not null, $"\"{text}\" must parse");
+                EventIdFilter.TryParse("1000–1010, −1005", out EventIdFilter? range);
+                Check.That(range!.Matches(1000) && range.Matches(1010) && !range.Matches(1005) && !range.Matches(999), "the range and the exclusion work");
+            });
+
+        yield return ("invalid_event_id_text_shows_no_events",
+            "While the event ID text is not valid, the filter the window uses matches no event at all instead of every event.",
+            () =>
+            {
+                Check.That(!EventIdFilter.TryParse("12a", out _), "the text is invalid");
+                var filter = new EventFilter { EventIds = EventIdFilter.Nothing };
+                Check.That(!filter.Matches(Fixtures.Item(Now, id: 0)) && !filter.Matches(Fixtures.Item(Now, id: 65535)), "no event matches");
+            });
+
         yield return ("text_filter_needs_every_word_ignoring_case",
             "Searching for \"disk FAILED\" finds an event whose message has both words in any case, and not one with only one of them.",
             () =>

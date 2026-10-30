@@ -46,6 +46,10 @@ internal static unsafe partial class Wevtapi
     public const int EvtOpenChannelPath = 1;
     public const int EvtOpenFilePath = 2;
     public const int EvtLogNumberOfLogRecords = 5;
+    public const int EvtLogOldestRecordNumber = 6;
+
+    // EVT_EVENT_PROPERTY_ID
+    public const int EvtEventPath = 1;
 
     // EVT_CHANNEL_CONFIG_PROPERTY_ID
     public const int EvtChannelConfigEnabled = 0;
@@ -56,6 +60,7 @@ internal static unsafe partial class Wevtapi
 
     // EVT_SUBSCRIBE_FLAGS and EVT_SUBSCRIBE_NOTIFY_ACTION
     public const int EvtSubscribeToFutureEvents = 1;
+    public const int EvtSubscribeStartAtOldestRecord = 2;
     public const int EvtSubscribeStartAfterBookmark = 3;
     public const int EvtSubscribeActionError = 0;
     public const int EvtSubscribeActionDeliver = 1;
@@ -120,6 +125,10 @@ internal static unsafe partial class Wevtapi
     [LibraryImport(Dll, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool EvtGetLogInfo(nint log, int propertyId, int bufferSize, void* buffer, out int bufferUsed);
+
+    [LibraryImport(Dll, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool EvtGetEventInfo(nint evt, int propertyId, int bufferSize, void* buffer, out int bufferUsed);
 
     [LibraryImport(Dll, SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     public static partial nint EvtOpenChannelConfig(nint session, string channelPath, int flags);

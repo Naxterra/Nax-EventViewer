@@ -10,12 +10,16 @@ public static class Program
     internal const string FileArgument = "--file";
     internal const string OverviewArgument = "--overview";
 
+    /// <summary>Exists while any window of the app is open. The installer and uninstaller wait for it to close.</summary>
+    internal const string RunningMutexName = "NaxEventViewer.Running";
+
     /// <summary>The log to open at start, from the command line, or null for the System log.</summary>
     internal static StartupTarget? Startup { get; private set; }
 
     [STAThread]
     private static int Main(string[] args)
     {
+        using var running = new Mutex(initiallyOwned: false, RunningMutexName);
         Startup = ParseArguments(args);
         WinRT.ComWrappersSupport.InitializeComWrappers();
         Application.Start(_ =>

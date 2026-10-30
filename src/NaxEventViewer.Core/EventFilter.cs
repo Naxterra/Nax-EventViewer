@@ -102,11 +102,25 @@ public sealed class EventIdFilter
     {
     }
 
-    /// <summary>Parses the text. Empty text gives a null filter. Returns false when the text is not valid.</summary>
+    /// <summary>Matches no event. The window uses it while the event ID text is not valid, so a typo never shows everything.</summary>
+    public static EventIdFilter Nothing { get; } = CreateNothing();
+
+    private static EventIdFilter CreateNothing()
+    {
+        var nothing = new EventIdFilter();
+        nothing._exclude.Add((int.MinValue, int.MaxValue));
+        return nothing;
+    }
+
+    /// <summary>
+    /// Parses the text. Empty text gives a null filter. Returns false when the text is not valid. En dashes, em dashes
+    /// and minus signs, which autocorrect often puts in place of a hyphen, count as hyphens.
+    /// </summary>
     public static bool TryParse(string? text, out EventIdFilter? filter)
     {
         filter = null;
         if (string.IsNullOrWhiteSpace(text)) return true;
+        text = text.Replace('–', '-').Replace('—', '-').Replace('−', '-');
 
         var result = new EventIdFilter();
         foreach (string rawPart in text.Split(',', StringSplitOptions.TrimEntries))

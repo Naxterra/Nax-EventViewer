@@ -16,6 +16,8 @@ public partial class App : Application
             throw;
         }
         UnhandledException += (_, args) => CrashLog.Write(args.Exception);
+        // A background task that failed without anyone waiting for it would otherwise leave no trace.
+        TaskScheduler.UnobservedTaskException += (_, args) => CrashLog.Write(args.Exception);
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)

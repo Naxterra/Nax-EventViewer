@@ -36,15 +36,19 @@ internal sealed unsafe class SystemRenderer : IDisposable
         if (_context == 0) throw new EventLogException("Windows could not prepare to read events.", Marshal.GetLastPInvokeError());
     }
 
-    /// <summary>Renders one event. <paramref name="fallbackChannel"/> is used when the event names no channel.</summary>
-    public EventItem? Render(nint evt, string fallbackChannel)
+    /// <summary>
+    /// Renders one event. <paramref name="log"/> is the log or file the query read, or null for a query over several
+    /// logs, in which case Windows is asked which log the event came from. The event's own Channel field is not good
+    /// enough for that: a forwarded event keeps the channel of the computer it came from.
+    /// </summary>
+    public EventItem? Render(nint evt, string? log)
     {
         while (true)
         {
             fixed (byte* buffer = _buffer)
             {
                 if (Wevtapi.EvtRender(_context, evt, Wevtapi.EvtRenderEventValues, _buffer.Length, buffer, out int used, out int count))
-                    return Read((EvtVariant*)buffer, count, fallbackChannel);
+                    return Read((EvtVariant*)buffer, count, log ?? EventPath(evt));
 
                 int error = Marshal.GetLastPInvokeError();
                 if (error != Wevtapi.ErrorInsufficientBuffer) return null;
@@ -53,27 +57,46 @@ internal sealed unsafe class SystemRenderer : IDisposable
         }
     }
 
-    private EventItem Read(EvtVariant* values, int count, string fallbackChannel)
+    /// <summary>The log a query result came from, as Windows reports it, or null when it does not say.</summary>
+    private string? EventPath(nint evt)
+    {
+        byte* small = stackalloc byte[512];
+        if (Wevtapi.EvtGetEventInfo(evt, Wevtapi.EvtEventPath, 512, small, out int used)) return String(*(EvtVariant*)small);
+        if (Marshal.GetLastPInvokeError() != Wevtapi.ErrorInsufficientBuffer) return null;
+        byte[] large = new byte[used];
+        fixed (byte* buffer = large)
+            return Wevtapi.EvtGetEventInfo(evt, Wevtapi.EvtEventPath, large.Length, buffer, out _) ? String(*(EvtVariant*)buffer) : null;
+    }
+
+    private EventItem Read(EvtVariant* values, int count, string? log)
     {
         EvtVariant Value(int index) => index < count ? values[index] : default;
 
+        string channel = String(Value(Channel)) ?? log ?? "";
         return new EventItem
         {
+            Log = log ?? channel,
             Provider = String(Value(ProviderName)) ?? "",
-            Channel = String(Value(Channel)) ?? fallbackChannel,
+            Channel = channel,
             Computer = String(Value(Computer)) ?? "",
             EventId = Value(EventId).BaseType == Wevtapi.EvtVarTypeUInt16 ? Value(EventId).UInt16 : (ushort)0,
             Level = Value(Level).BaseType == Wevtapi.EvtVarTypeByte ? Value(Level).Byte : (byte)0,
             Task = Value(Task).BaseType == Wevtapi.EvtVarTypeUInt16 ? Value(Task).UInt16 : (ushort)0,
             Opcode = Value(Opcode).BaseType == Wevtapi.EvtVarTypeByte ? Value(Opcode).Byte : (byte)0,
             Keywords = Value(Keywords).BaseType is Wevtapi.EvtVarTypeHexInt64 or Wevtapi.EvtVarTypeUInt64 ? Value(Keywords).UInt64 : 0,
-            TimeCreatedUtc = Value(TimeCreated).BaseType == Wevtapi.EvtVarTypeFileTime ? DateTime.FromFileTimeUtc((long)Value(TimeCreated).UInt64) : DateTime.MinValue,
+            TimeCreatedUtc = Value(TimeCreated).BaseType == Wevtapi.EvtVarTypeFileTime ? FileTimeToUtc(Value(TimeCreated).UInt64) : DateTime.MinValue,
             RecordId = Value(EventRecordId).BaseType == Wevtapi.EvtVarTypeUInt64 ? Value(EventRecordId).UInt64 : 0,
             ProcessId = Value(ProcessId).BaseType == Wevtapi.EvtVarTypeUInt32 ? Value(ProcessId).UInt32 : 0,
             ThreadId = Value(ThreadId).BaseType == Wevtapi.EvtVarTypeUInt32 ? Value(ThreadId).UInt32 : 0,
             UserSid = Sid(Value(UserId)),
         };
     }
+
+    private static readonly ulong LatestFileTime = (ulong)DateTime.MaxValue.ToFileTimeUtc();
+
+    /// <summary>Converts a FILETIME. A damaged or crafted file can hold any value, and one out of range becomes the earliest date instead of an exception.</summary>
+    internal static DateTime FileTimeToUtc(ulong fileTime) =>
+        fileTime <= LatestFileTime ? DateTime.FromFileTimeUtc((long)fileTime) : DateTime.MinValue;
 
     private string? String(EvtVariant value) =>
         value.BaseType == Wevtapi.EvtVarTypeString && value.Pointer != 0

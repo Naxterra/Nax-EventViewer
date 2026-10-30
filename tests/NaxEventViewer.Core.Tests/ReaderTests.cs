@@ -70,6 +70,78 @@ internal static class ReaderTests
                 Check.That(detail.Xml is not null && detail.Xml.Contains($"<EventRecordID>{newest!.RecordId}</EventRecordID>"), "the XML belongs to the newest event: " + detail.Error);
             });
 
+        yield return ("detail_lookup_rejects_an_event_that_only_shares_the_record_number",
+            "When the event found under the selected record number has another time, computer or ID, as after a log was cleared, a file replaced or for forwarded events from another PC, the detail pane reports that the event was not found instead of showing the other one.",
+            () =>
+            {
+                LogSource source = LogSource.ForFile(Fixtures.ApplicationLogFile);
+                EventItem real = ReadAll(Fixtures.ApplicationLogFile, out _)[0];
+                EventItem otherTime = Copy(real, timeUtc: real.TimeCreatedUtc.AddSeconds(-1));
+                EventItem otherComputer = Copy(real, computer: real.Computer + "-other");
+                EventItem otherId = Copy(real, eventId: (ushort)(real.EventId + 1));
+                foreach (EventItem impostor in new[] { otherTime, otherComputer, otherId })
+                {
+                    EventDetail detail = EventReader.ReadDetail(source, impostor);
+                    Check.That(detail.Xml is null && detail.Error is not null, "a different event must not be shown");
+                }
+                Check.That(EventReader.ReadDetail(source, real).Xml is not null, "the real event is still found");
+            });
+
+        yield return ("overview_events_remember_the_log_they_were_read_from",
+            "Events in the problems overview over System and Application know which of the two logs they were read from, which the detail pane needs for forwarded events.",
+            () =>
+            {
+                var items = new List<EventItem>();
+                EventReader.ReadRecords(LogSource.ForProblemsOverview(["System", "Application"], TimeSpan.FromDays(30)), items.AddRange, CancellationToken.None);
+                Check.That(items.Count > 0, "System and Application had no warnings or errors in 30 days");
+                EventItem? wrong = items.FirstOrDefault(i => !string.Equals(i.Log, i.Channel, StringComparison.OrdinalIgnoreCase)
+                    || !(i.Log.Equals("System", StringComparison.OrdinalIgnoreCase) || i.Log.Equals("Application", StringComparison.OrdinalIgnoreCase)));
+                Check.That(wrong is null, $"event {wrong?.RecordId} of {wrong?.Channel} says it was read from \"{wrong?.Log}\"");
+                EventDetail detail = EventReader.ReadDetail(LogSource.ForProblemsOverview(["System", "Application"], TimeSpan.FromDays(30)), items[0]);
+                Check.That(detail.Xml is not null, "the first overview event is found again: " + detail.Error);
+            });
+
+        yield return ("events_from_different_computers_with_the_same_record_number_count_as_different",
+            "Two events that share log, channel and record number but come from different computers, as forwarded events can, count as different events.",
+            () =>
+            {
+                EventItem a = new() { Log = "ForwardedEvents", Channel = "Security", Computer = "PC-A", Provider = "x", RecordId = 7 };
+                EventItem b = new() { Log = "ForwardedEvents", Channel = "Security", Computer = "PC-B", Provider = "x", RecordId = 7 };
+                EventItem c = new() { Log = "forwardedevents", Channel = "SECURITY", Computer = "pc-a", Provider = "x", RecordId = 7 };
+                Check.That(a.Key != b.Key, "events of different computers must have different keys");
+                Check.That(a.Key == c.Key && a.Key.GetHashCode() == c.Key.GetHashCode(), "names compare ignoring case");
+            });
+
+        yield return ("damaged_timestamp_becomes_the_earliest_date_instead_of_an_error",
+            "A time value out of range, as a damaged or crafted .evtx file can hold, is read as the earliest date instead of stopping the read with an exception.",
+            () =>
+            {
+                Check.Equal(DateTime.MinValue, Native.SystemRenderer.FileTimeToUtc(ulong.MaxValue));
+                Check.Equal(DateTime.MinValue, Native.SystemRenderer.FileTimeToUtc((ulong)long.MaxValue));
+                var time = new DateTime(2026, 10, 30, 12, 0, 0, DateTimeKind.Utc);
+                Check.Equal(time, Native.SystemRenderer.FileTimeToUtc((ulong)time.ToFileTimeUtc()));
+            });
+
+        yield return ("unexpected_error_while_reading_ends_the_load_with_a_problem",
+            "When reading stops because of an unexpected error, the load still reports that the records are done with a problem, reports the error, and finishes the message pass, so the window never waits forever.",
+            () =>
+            {
+                ReadSummary? done = null;
+                Exception? reported = null;
+                using var messagesDone = new ManualResetEventSlim();
+                LogLoader.Start(LogSource.ForFile(Fixtures.ApplicationLogFile), new MessageStore(), new LoadCallbacks
+                {
+                    RecordsRead = _ => throw new InvalidOperationException("simulated failure"),
+                    RecordsDone = summary => done = summary,
+                    MessagesFormatted = _ => { },
+                    MessagesDone = messagesDone.Set,
+                    UnexpectedError = ex => reported = ex,
+                }, CancellationToken.None);
+                Check.That(messagesDone.Wait(TimeSpan.FromSeconds(60)), "the load must finish");
+                Check.That(done is not null && done.Problems.Any(p => p.Contains("simulated failure")), "the records end with the problem");
+                Check.That(reported is InvalidOperationException, "the error is reported for the crash log");
+            });
+
         yield return ("reading_a_saved_log_leaves_the_file_unchanged",
             "Reading a saved log through both passes and the detail lookup leaves the file byte for byte unchanged.",
             () =>
@@ -112,7 +184,7 @@ internal static class ReaderTests
             {
                 const string channel = "Microsoft-Windows-PowerShell/Operational";
                 using var arrived = new BlockingCollection<EventItem>();
-                using LiveSubscription live = LiveSubscription.Start(channel, null, new MessageStore(), arrived.Add, _ => { });
+                using LiveSubscription live = LiveSubscription.Start(channel, NewestRecordId(channel), new MessageStore(), arrived.Add, _ => { });
                 using var process = Process.Start(new ProcessStartInfo("powershell.exe", "-NoProfile -NonInteractive -Command exit") { UseShellExecute = false, CreateNoWindow = true })!;
                 uint pid = (uint)process.Id;
                 process.WaitForExit(30_000);
@@ -132,10 +204,20 @@ internal static class ReaderTests
             () =>
             {
                 string? reported = null;
-                using LiveSubscription live = LiveSubscription.Start("System", null, new MessageStore(), _ => { }, message => reported = message);
+                using LiveSubscription live = LiveSubscription.Start("System", NewestRecordId("System"), new MessageStore(), _ => { }, message => reported = message);
                 const int queryResultStale = 15011;
                 LiveSubscription.Dispatch(0, live.Id, queryResultStale);
                 Check.That(reported is not null && reported.StartsWith("Live updates for System stopped."), "the stop is reported: " + reported);
+            });
+
+        yield return ("live_subscription_after_reading_no_events_delivers_events_already_in_the_log",
+            "When the read found no events, watching the log also delivers events that were written before watching started, so an event written between the read and the start of watching is not lost.",
+            () =>
+            {
+                using var arrived = new BlockingCollection<EventItem>();
+                using LiveSubscription live = LiveSubscription.Start("System", null, new MessageStore(), arrived.Add, _ => { });
+                Check.That(arrived.TryTake(out EventItem? first, TimeSpan.FromSeconds(20)), "no existing System event arrived");
+                Check.That(first!.Channel == "System" && first.Log == "System", "the event belongs to System");
             });
 
         yield return ("missing_file_reports_a_problem_instead_of_failing",
@@ -148,6 +230,30 @@ internal static class ReaderTests
                 Check.That(summary.Problems.Count == 1, "one problem is reported");
             });
     }
+
+    private static ulong? NewestRecordId(string channel)
+    {
+        ulong? newest = null;
+        using var stop = new CancellationTokenSource();
+        EventReader.ReadRecords(LogSource.ForChannel(channel), batch =>
+        {
+            newest ??= batch.Max(i => i.RecordId);
+            stop.Cancel();
+        }, stop.Token);
+        return newest;
+    }
+
+    private static EventItem Copy(EventItem item, DateTime? timeUtc = null, string? computer = null, ushort? eventId = null) => new()
+    {
+        Log = item.Log,
+        Channel = item.Channel,
+        Provider = item.Provider,
+        Computer = computer ?? item.Computer,
+        RecordId = item.RecordId,
+        TimeCreatedUtc = timeUtc ?? item.TimeCreatedUtc,
+        EventId = eventId ?? item.EventId,
+        Level = item.Level,
+    };
 
     private static List<EventItem> ReadAll(string file, out ReadSummary summary)
     {

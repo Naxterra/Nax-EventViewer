@@ -16,3 +16,6 @@ public sealed class EventLogException(string message, int errorCode) : Exception
         return new EventLogException($"{what} {new System.ComponentModel.Win32Exception(error).Message}", error);
     }
 }
+
+/// <summary>A save that was refused because there was nothing to write, so no file was created.</summary>
+public sealed class NothingToSaveException(string message) : InvalidOperationException(message);

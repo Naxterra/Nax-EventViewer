@@ -23,7 +23,11 @@ public static class EventExport
         {
             if (!Wevtapi.EvtExportLog(0, source.Path, "*", localCopy, flags))
                 throw EventLogException.FromLastError($"Windows could not save {source.DisplayName}.");
-            AtomicFile.Write(targetPath, temporaryPath => File.Copy(localCopy, temporaryPath));
+            AtomicFile.Write(targetPath, output =>
+            {
+                using var input = new FileStream(localCopy, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16);
+                input.CopyTo(output, 1 << 20);
+            });
         }
         finally
         {
@@ -51,20 +55,24 @@ public static class EventExport
         }
     }
 
-    /// <summary>Writes the events as comma-separated values with a header row, readable by Excel.</summary>
-    public static void SaveCsv(string targetPath, IEnumerable<EventItem> items)
+    /// <summary>
+    /// Writes the events as comma-separated values with a header row, readable by Excel, and returns how many events
+    /// were written. Fails without creating a file when there are no events, so an unreadable or empty list is never
+    /// reported as saved.
+    /// </summary>
+    public static int SaveCsv(string targetPath, IEnumerable<EventItem> items)
     {
-        AtomicFile.Write(targetPath, temporaryPath =>
+        int written = 0;
+        AtomicFile.Write(targetPath, stream =>
         {
-            using var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write);
-            File.SetAttributes(temporaryPath, FileAttributes.Hidden);
-            using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
-            writer.Write("Level,Date and time,Source,Event ID,Task category,Log,Computer,Record ID,Message\r\n");
+            using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true), 1 << 16, leaveOpen: true);
+            writer.Write("Level,Date and time,Date and time (UTC),Source,Event ID,Task category,Log,Computer,Record ID,Message\r\n");
             foreach (EventItem item in items)
             {
                 WriteRow(writer,
                     item.LevelText,
                     item.TimeCreatedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+                    item.TimeCreatedUtc.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
                     item.Provider,
                     item.EventIdText,
                     item.TaskName,
@@ -72,8 +80,11 @@ public static class EventExport
                     item.Computer,
                     item.RecordId.ToString(CultureInfo.InvariantCulture),
                     item.Message ?? "");
+                written++;
             }
+            if (written == 0) throw new NothingToSaveException("The list has no events to save.");
         });
+        return written;
     }
 
     private static void WriteRow(TextWriter writer, params ReadOnlySpan<string> cells)
@@ -87,35 +98,60 @@ public static class EventExport
     }
 
     /// <summary>
-    /// Quotes a cell when needed. A cell that starts like a spreadsheet formula gets a leading apostrophe, because
-    /// event text comes from programs and must never run as a formula when the file is opened.
+    /// Quotes a cell when needed and makes sure no part of it can run as a spreadsheet formula, because event text
+    /// comes from programs. A cell that starts like a formula gets a leading apostrophe. So does every part after a
+    /// semicolon, tab or line break that starts like one: Excel set to the semicolon list separator, as in most
+    /// European languages, ignores the quotes of a comma-separated file and splits cells at those characters.
     /// </summary>
     internal static string CsvCell(string value)
     {
-        if (value.Length > 0 && value[0] is '=' or '+' or '-' or '@' or '\t' or '\r') value = "'" + value;
-        bool needsQuotes = value.AsSpan().IndexOfAny(",\"\r\n") >= 0;
+        if (value.Length > 0 && (StartsFormula(value[0]) || value[0] is '\t' or '\r')) value = "'" + value;
+        if (value.AsSpan().IndexOfAny(";\t\r\n") >= 0) value = DefuseAfterSeparators(value);
+        bool needsQuotes = value.AsSpan().IndexOfAny(",\";\t\r\n") >= 0;
         return needsQuotes ? "\"" + value.Replace("\"", "\"\"") + "\"" : value;
+    }
+
+    private static bool StartsFormula(char c) => c is '=' or '+' or '-' or '@';
+
+    private static string DefuseAfterSeparators(string value)
+    {
+        var result = new StringBuilder(value.Length + 8);
+        for (int i = 0; i < value.Length; i++)
+        {
+            result.Append(value[i]);
+            if (value[i] is ';' or '\t' or '\r' or '\n' && i + 1 < value.Length && StartsFormula(value[i + 1])) result.Append('\'');
+        }
+        return result.ToString();
     }
 }
 
 /// <summary>
-/// Writes a file through a temporary file in the same folder and replaces the target only when writing succeeded.
-/// A temporary file left behind by a crash or a killed process is removed by the next save to the same target.
+/// Writes a file through a hidden temporary file in the same folder and replaces the target only when writing
+/// succeeded. A temporary file left behind by a crash or a killed process is removed by the next save to that folder.
 /// </summary>
 internal static class AtomicFile
 {
     /// <summary>A temporary file younger than this may belong to a save that is still running in another window.</summary>
     internal static readonly TimeSpan StaleAfter = TimeSpan.FromMinutes(10);
 
-    public static void Write(string targetPath, Action<string> writeTemporaryFile)
+    // The temporary name is short and fixed apart from a GUID, so a long target name still leaves room for it.
+    internal const string TemporaryPrefix = ".nax-";
+    private const string TemporaryMarker = ".partial";
+
+    /// <summary>Calls <paramref name="write"/> with a stream on a new hidden temporary file, then puts that file in place of the target.</summary>
+    public static void Write(string targetPath, Action<Stream> write)
     {
         string fullPath = Path.GetFullPath(targetPath);
         string folder = Path.GetDirectoryName(fullPath) ?? throw new ArgumentException("The path has no folder.", nameof(targetPath));
-        RemoveStaleTemporaryFiles(fullPath);
-        string temporaryPath = Path.Combine(folder, TemporaryPrefix(fullPath) + Guid.NewGuid().ToString("N") + TemporarySuffix(fullPath));
+        RemoveStaleTemporaryFiles(folder);
+        string temporaryPath = Path.Combine(folder, TemporaryPrefix + Guid.NewGuid().ToString("N") + TemporaryMarker + Path.GetExtension(fullPath));
         try
         {
-            writeTemporaryFile(temporaryPath);
+            using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 16))
+            {
+                File.SetAttributes(temporaryPath, FileAttributes.Hidden);
+                write(stream);
+            }
             File.SetAttributes(temporaryPath, File.GetAttributes(temporaryPath) & ~FileAttributes.Hidden);
             File.Move(temporaryPath, fullPath, overwrite: true);
         }
@@ -126,24 +162,18 @@ internal static class AtomicFile
         }
     }
 
-    private static string TemporaryPrefix(string fullPath) => "." + Path.GetFileNameWithoutExtension(fullPath) + ".";
-
-    private static string TemporarySuffix(string fullPath) => ".partial" + Path.GetExtension(fullPath);
-
-    /// <summary>Deletes earlier temporary files of this exact target that are older than <see cref="StaleAfter"/>.</summary>
-    private static void RemoveStaleTemporaryFiles(string fullPath)
+    /// <summary>Deletes earlier temporary files in this folder that are older than <see cref="StaleAfter"/>.</summary>
+    private static void RemoveStaleTemporaryFiles(string folder)
     {
-        string folder = Path.GetDirectoryName(fullPath)!;
-        string prefix = TemporaryPrefix(fullPath);
-        string suffix = TemporarySuffix(fullPath);
         try
         {
-            foreach (string candidate in Directory.EnumerateFiles(folder, prefix + "*" + suffix))
+            foreach (string candidate in Directory.EnumerateFiles(folder, TemporaryPrefix + "*" + TemporaryMarker + "*"))
             {
+                // Only names this class created: the prefix, 32 hexadecimal digits, the marker and the target's extension.
                 string name = Path.GetFileName(candidate);
-                string middle = name[prefix.Length..^suffix.Length];
-                // Only names this class created: the prefix, 32 hexadecimal digits, the suffix.
-                if (middle.Length != 32 || !middle.All(char.IsAsciiHexDigit)) continue;
+                if (name.Length < TemporaryPrefix.Length + 32 + TemporaryMarker.Length) continue;
+                string middle = name.Substring(TemporaryPrefix.Length, 32);
+                if (!middle.All(char.IsAsciiHexDigit) || string.CompareOrdinal(name, TemporaryPrefix.Length + 32, TemporaryMarker, 0, TemporaryMarker.Length) != 0) continue;
                 if (DateTime.UtcNow - File.GetLastWriteTimeUtc(candidate) > StaleAfter) TryDelete(candidate);
             }
         }

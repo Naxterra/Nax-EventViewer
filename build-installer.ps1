@@ -27,8 +27,10 @@ $publishDir = Join-Path $root 'artifacts\publish\win-x64'
 if (Test-Path $publishDir) { Remove-Item $publishDir -Recurse -Force }
 
 Write-Host "Publishing Nax Event Viewer $Version"
-dotnet publish $project -c Release -r win-x64 -o $publishDir -p:Version=$Version -nologo -v q
+dotnet publish $project -c Release -r win-x64 --self-contained -o $publishDir -p:Version=$Version -nologo -v q
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXITCODE." }
+# Without the .NET runtime in the folder, the app would only start on PCs that happen to have the same .NET installed.
+if (-not (Test-Path (Join-Path $publishDir 'coreclr.dll'))) { throw "The published app does not include the .NET runtime." }
 
 Write-Host "Building the installer"
 & $IsccPath /Q "/DAppVersion=$Version" "/DPublishDir=$publishDir" (Join-Path $root 'installer\Nax-EventViewer.iss')
