@@ -41,16 +41,17 @@ public sealed unsafe class LiveSubscription : IDisposable
     /// <summary>
     /// Starts delivering events of <paramref name="channel"/> that come after record <paramref name="afterRecordId"/>.
     /// When it is null, because the caller read no events, every event in the log is delivered, so an event written
-    /// between that read and this call is not lost. <paramref name="onError"/> receives a description when Windows ends the
+    /// between that read and this call is not lost. With <paramref name="onlyFuture"/>, only events written from now
+    /// on are delivered, for logs whose record numbers cannot serve as a bookmark. <paramref name="onError"/> receives a description when Windows ends the
     /// subscription, for example because the log was cleared; no further events arrive after that.
     /// </summary>
-    public static LiveSubscription Start(string channel, ulong? afterRecordId, MessageStore store, Action<EventItem> onEvent, Action<string> onError)
+    public static LiveSubscription Start(string channel, ulong? afterRecordId, bool onlyFuture, MessageStore store, Action<EventItem> onEvent, Action<string> onError)
     {
         var subscription = new LiveSubscription(channel, store, onEvent, onError);
         Active[subscription._id] = subscription;
 
         nint bookmark = 0;
-        if (afterRecordId is ulong recordId)
+        if (afterRecordId is ulong recordId && !onlyFuture)
         {
             string id = recordId.ToString(CultureInfo.InvariantCulture);
             bookmark = Wevtapi.EvtCreateBookmark($"<BookmarkList><Bookmark Channel=\"{SecurityElement.Escape(channel)}\" RecordId=\"{id}\" IsCurrent=\"true\"/></BookmarkList>");
@@ -59,7 +60,7 @@ public sealed unsafe class LiveSubscription : IDisposable
         {
             // No EvtSubscribeTolerateQueryErrors: for a single log it would turn a failure into a subscription that never delivers.
             int flags = bookmark != 0 ? Wevtapi.EvtSubscribeStartAfterBookmark
-                : afterRecordId is null ? Wevtapi.EvtSubscribeStartAtOldestRecord
+                : afterRecordId is null && !onlyFuture ? Wevtapi.EvtSubscribeStartAtOldestRecord
                 : Wevtapi.EvtSubscribeToFutureEvents;
             subscription._subscription = Wevtapi.EvtSubscribe(0, 0, channel, "*", bookmark, subscription._id, &Callback, flags);
             if (subscription._subscription == 0)

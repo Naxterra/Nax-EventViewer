@@ -13,13 +13,15 @@ public static class Program
     /// <summary>Exists while any window of the app is open. The installer and uninstaller wait for it to close.</summary>
     internal const string RunningMutexName = "NaxEventViewer.Running";
 
+    private static Mutex? _running;
+
     /// <summary>The log to open at start, from the command line, or null for the System log.</summary>
     internal static StartupTarget? Startup { get; private set; }
 
     [STAThread]
     private static int Main(string[] args)
     {
-        using var running = new Mutex(initiallyOwned: false, RunningMutexName);
+        HoldRunningMutex();
         Startup = ParseArguments(args);
         WinRT.ComWrappersSupport.InitializeComWrappers();
         Application.Start(_ =>
@@ -29,6 +31,23 @@ public static class Program
             new App();
         });
         return 0;
+    }
+
+    /// <summary>
+    /// Opens or creates the mutex that tells the installer the app is running, and keeps it until the process ends.
+    /// An instance running as administrator creates a mutex that a normal instance may not open; the normal instance
+    /// then starts without it and tries again later, because the other instance holds the mutex meanwhile.
+    /// </summary>
+    internal static void HoldRunningMutex()
+    {
+        if (_running is not null) return;
+        try
+        {
+            _running = new Mutex(initiallyOwned: false, RunningMutexName);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or WaitHandleCannotBeOpenedException or IOException)
+        {
+        }
     }
 
     /// <summary>Accepts "--log Name", "--file Path", "--overview", or a single .evtx path (for opening a file from Explorer).</summary>

@@ -100,6 +100,7 @@ public sealed partial class MainWindow : Window
         {
             if (_timeWindow is not null) RequestRebuild(keepScroll: true);
             DropOverwrittenEvents();
+            Program.HoldRunningMutex();
         };
         _clockTimer.Start();
 
@@ -378,6 +379,9 @@ public sealed partial class MainWindow : Window
     {
         if (_source is not { SupportsLiveUpdates: true } source || LiveToggle.IsChecked != true || _live is not null || _recordsLoading || _load is null) return;
         ulong? newest = _all.Count == 0 ? null : _all.Max(i => i.RecordId);
+        // Record numbers of forwarded events belong to the PCs they came from, so no bookmark can be built from them.
+        // Such a log is watched for new events only.
+        bool onlyFuture = _all.Any(IsForwarded);
         CancellationToken token = _load.Token;
         DispatcherQueue queue = DispatcherQueue;
         ConcurrentQueue<EventItem> pending = _livePending;
@@ -386,7 +390,7 @@ public sealed partial class MainWindow : Window
             // New events collect in a queue and the tick adds them in one go, so a burst of thousands of events per
             // second costs one list update per tick instead of one per event.
             LiveSubscription? subscription = null;
-            subscription = LiveSubscription.Start(source.Path, newest, _messages,
+            subscription = LiveSubscription.Start(source.Path, onlyFuture ? null : newest, onlyFuture, _messages,
                 item =>
                 {
                     pending.Enqueue(item);
@@ -465,8 +469,14 @@ public sealed partial class MainWindow : Window
         }
         // A running rebuild remembers how many events it saw, so the list may only shrink between rebuilds.
         if (oldest is not long first || first <= 0 || version != _loadVersion || _rebuildRunning) return;
-        if (_all.RemoveAll(i => i.RecordId < (ulong)first) > 0) RequestRebuild(keepScroll: true);
+        // A forwarded event keeps the record number of the PC it came from, which says nothing about this log's
+        // oldest record, so only events that were written to this log itself are compared.
+        if (_all.RemoveAll(i => i.RecordId < (ulong)first && !IsForwarded(i)) == 0) return;
+        if (!_messagesLoading) _missingMessages = _all.Count(i => !i.HasMessage);
+        RequestRebuild(keepScroll: true);
     }
+
+    private static bool IsForwarded(EventItem item) => !string.Equals(item.Log, item.Channel, StringComparison.OrdinalIgnoreCase);
 
     private void LiveToggle_Click(object sender, RoutedEventArgs e)
     {

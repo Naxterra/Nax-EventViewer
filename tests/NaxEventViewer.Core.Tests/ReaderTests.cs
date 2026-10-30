@@ -184,7 +184,7 @@ internal static class ReaderTests
             {
                 const string channel = "Microsoft-Windows-PowerShell/Operational";
                 using var arrived = new BlockingCollection<EventItem>();
-                using LiveSubscription live = LiveSubscription.Start(channel, NewestRecordId(channel), new MessageStore(), arrived.Add, _ => { });
+                using LiveSubscription live = LiveSubscription.Start(channel, NewestRecordId(channel), onlyFuture: false, new MessageStore(), arrived.Add, _ => { });
                 using var process = Process.Start(new ProcessStartInfo("powershell.exe", "-NoProfile -NonInteractive -Command exit") { UseShellExecute = false, CreateNoWindow = true })!;
                 uint pid = (uint)process.Id;
                 process.WaitForExit(30_000);
@@ -204,7 +204,7 @@ internal static class ReaderTests
             () =>
             {
                 string? reported = null;
-                using LiveSubscription live = LiveSubscription.Start("System", NewestRecordId("System"), new MessageStore(), _ => { }, message => reported = message);
+                using LiveSubscription live = LiveSubscription.Start("System", NewestRecordId("System"), onlyFuture: false, new MessageStore(), _ => { }, message => reported = message);
                 const int queryResultStale = 15011;
                 LiveSubscription.Dispatch(0, live.Id, queryResultStale);
                 Check.That(reported is not null && reported.StartsWith("Live updates for System stopped."), "the stop is reported: " + reported);
@@ -215,9 +215,21 @@ internal static class ReaderTests
             () =>
             {
                 using var arrived = new BlockingCollection<EventItem>();
-                using LiveSubscription live = LiveSubscription.Start("System", null, new MessageStore(), arrived.Add, _ => { });
+                using LiveSubscription live = LiveSubscription.Start("System", null, onlyFuture: false, new MessageStore(), arrived.Add, _ => { });
                 Check.That(arrived.TryTake(out EventItem? first, TimeSpan.FromSeconds(20)), "no existing System event arrived");
                 Check.That(first!.Channel == "System" && first.Log == "System", "the event belongs to System");
+            });
+
+        yield return ("live_subscription_for_new_events_only_does_not_replay_the_log",
+            "Watching a log for new events only, as the window does for forwarded events, delivers no event that was already in the log when watching started.",
+            () =>
+            {
+                ulong newest = NewestRecordId("System") ?? throw new Exception("the System log is empty");
+                using var arrived = new BlockingCollection<EventItem>();
+                using LiveSubscription live = LiveSubscription.Start("System", null, onlyFuture: true, new MessageStore(), arrived.Add, _ => { });
+                Thread.Sleep(TimeSpan.FromSeconds(3));
+                EventItem? old = arrived.FirstOrDefault(i => i.RecordId <= newest);
+                Check.That(old is null, $"event {old?.RecordId}, which was already in the log, was delivered");
             });
 
         yield return ("missing_file_reports_a_problem_instead_of_failing",
