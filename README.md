@@ -50,4 +50,4 @@ The installer test installs the app silently into a temporary folder, checks wha
 
 ## License
 
-Nax Event Viewer is free software under the GNU General Public License, version 3. The full text is in [LICENSE](LICENSE).
+Nax Event Viewer is source-available under the Nax Source-Available License 1.0. You may install and run the official release builds for any purpose and read the source code, but copying, changing or redistributing it needs written permission. The full text is in [LICENSE](LICENSE).

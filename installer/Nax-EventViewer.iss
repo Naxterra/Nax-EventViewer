@@ -30,7 +30,8 @@ MinVersion=10.0.22000
 OutputDir=..\artifacts\installer
 OutputBaseFilename=Nax-EventViewer-{#AppVersion}-setup
 SetupIconFile=..\src\NaxEventViewer.App\Assets\Nax-EventViewer.ico
-; The GPL needs no acceptance, so the license is shown as information with a Next button, not as an agreement.
+; The license only grants rights and asks nothing of a user who just runs the app, so it is shown as information
+; with a Next button, not as an agreement to accept.
 InfoBeforeFile=..\LICENSE
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}
