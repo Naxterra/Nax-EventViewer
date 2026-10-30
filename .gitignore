@@ -1,0 +1,20 @@
+# Build output
+bin/
+obj/
+artifacts/
+publish/
+
+# User/local data
+*.user
+*.suo
+.vs/
+
+# Logs and crash reports
+*.log
+
+# OS/editor noise
+Thumbs.db
+Desktop.ini
+.DS_Store
+.idea/
+.vscode/

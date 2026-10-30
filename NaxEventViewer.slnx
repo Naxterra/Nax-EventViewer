@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/NaxEventViewer.Core/NaxEventViewer.Core.csproj" />
+    <Project Path="src/NaxEventViewer.App/NaxEventViewer.App.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/NaxEventViewer.Core.Tests/NaxEventViewer.Core.Tests.csproj" />
+  </Folder>
+</Solution>
