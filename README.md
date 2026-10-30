@@ -47,3 +47,7 @@ The installer test installs the app silently into a temporary folder, checks wha
 ## Command line
 
 `Nax-EventViewer.exe --log "Microsoft-Windows-PowerShell/Operational"` opens a log, `--file path.evtx` (or just the path) opens a saved file, and `--overview` opens the problems overview.
+
+## License
+
+Nax Event Viewer is free software under the GNU General Public License, version 3. The full text is in [LICENSE](LICENSE).
