@@ -52,6 +52,13 @@ public sealed unsafe class LiveSubscription : IDisposable
         Active[subscription._id] = subscription;
 
         nint bookmark = afterBookmark is null ? 0 : Wevtapi.EvtCreateBookmark(afterBookmark);
+        if (afterBookmark is not null && bookmark == 0)
+        {
+            // Watching only for future events instead would silently miss what was written since the bookmark.
+            var error = EventLogException.FromLastError($"Windows could not continue watching {channel} from where it stopped.");
+            subscription.Dispose();
+            throw error;
+        }
         try
         {
             // No EvtSubscribeTolerateQueryErrors: for a single log it would turn a failure into a subscription that never delivers.
@@ -126,15 +133,24 @@ public sealed unsafe class LiveSubscription : IDisposable
             try
             {
                 item = _renderer.Render(evt, _channel);
-                _last.MoveTo(evt);
-                // Nobody listens to the new item yet, so setting the text here on the pool thread is safe.
-                item?.SetFormatted(_store.Add(_formatter.FormatMessage(evt, item)), _formatter.FormatTask(evt, item));
             }
             catch (Exception)
             {
                 // An exception must never cross back into the native callback.
                 return;
             }
+            if (item is null) return;
+            try
+            {
+                // Nobody listens to the new item yet, so setting the text here on the pool thread is safe.
+                item.SetFormatted(_store.Add(_formatter.FormatMessage(evt, item)), _formatter.FormatTask(evt, item));
+            }
+            catch (Exception)
+            {
+                // The event is still delivered without its text; the detail pane formats it again when it is selected.
+            }
+            // Only an event that is delivered moves the bookmark, so resuming never skips one.
+            _last.MoveTo(evt);
         }
         if (item is not null)
         {

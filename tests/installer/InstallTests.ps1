@@ -114,8 +114,8 @@ try {
         if ([Threading.Mutex]::TryOpenExisting('NaxEventViewer.Running', [ref]$mutex)) { $mutex.Dispose() }
         else { $problems += 'the running app has no mutex that a normal process can open' }
     }
-    Report 'installed_app_carries_its_own_dotnet_starts_and_can_be_seen_running' `
-        'The installed program folder contains the .NET runtime, the app does not ask for a .NET installed on the PC, it starts and shows its window, and a normal process can see through its mutex that it runs.' $problems
+    Report 'installed_app_carries_its_own_dotnet_starts_and_creates_its_running_mutex' `
+        'The installed program folder contains the .NET runtime, the app does not ask for a .NET installed on the PC, it starts and shows its window, and another normal process can open its running mutex. An app started as administrator is not covered.' $problems
 
     # Uninstalling while the app runs must either refuse and leave the installation whole, or remove all of it.
     $problems = @()

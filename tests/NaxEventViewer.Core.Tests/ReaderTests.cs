@@ -275,6 +275,20 @@ internal static class ReaderTests
                 Check.That(repeated is null, $"event {repeated?.RecordId} was delivered twice");
             });
 
+        yield return ("live_subscription_with_an_unusable_bookmark_fails_instead_of_skipping_events",
+            "Watching from a bookmark that Windows cannot use fails with an error, instead of quietly watching only new events and missing the ones written since the bookmark.",
+            () =>
+            {
+                try
+                {
+                    using LiveSubscription live = LiveSubscription.Start("System", "<not a bookmark", fromOldest: false, new MessageStore(), _ => { }, _ => { });
+                    throw new Exception("watching from an unusable bookmark should have failed");
+                }
+                catch (EventLogException)
+                {
+                }
+            });
+
         yield return ("missing_file_reports_a_problem_instead_of_failing",
             "Opening a .evtx file that does not exist gives no events and a readable problem description instead of an exception.",
             () =>

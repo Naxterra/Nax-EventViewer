@@ -11,6 +11,9 @@ internal sealed unsafe class Bookmark : IDisposable
     private nint _handle = Wevtapi.EvtCreateBookmark(null);
     private bool _set;
 
+    /// <summary>True once the bookmark points to an event.</summary>
+    public bool IsSet => _set;
+
     /// <summary>Moves the bookmark to <paramref name="evt"/>.</summary>
     public void MoveTo(nint evt)
     {

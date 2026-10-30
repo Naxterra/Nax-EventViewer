@@ -90,7 +90,7 @@ public static unsafe class EventReader
                 {
                     // Newest first: the first event of the first batch. Oldest first: the last event of each batch.
                     if (!newestFirst) newest.MoveTo(handles[count - 1]);
-                    else if (summary.Count == 0) newest.MoveTo(handles[0]);
+                    else if (!newest.IsSet) newest.MoveTo(handles[0]);
                 }
                 var batch = new List<EventItem>(count);
                 for (int i = 0; i < count; i++)

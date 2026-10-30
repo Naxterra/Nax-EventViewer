@@ -409,11 +409,14 @@ public sealed partial class MainWindow : Window
                     if (!token.IsCancellationRequested && subscription is not null && _live == subscription) OnLiveFailed(message);
                 }));
             _live = subscription;
+            // Without a bookmark, only events written from now on arrive, so say that a few may be missing.
+            if (_resumeBookmark is null && _all.Count > 0 && !ProblemBar.IsOpen)
+                ShowProblem("Live updates show new events from now on. Events written while the log was read may be missing until you press F5.", offerAdmin: false);
         }
         catch (EventLogException ex)
         {
             // An earlier problem, such as a read error, explains more than the failed subscription does.
-            if (!ProblemBar.IsOpen) ShowProblem(ex.Message, offerAdmin: false);
+            if (!ProblemBar.IsOpen) ShowProblem(ex.Message + " Press F5 to read the log again.", offerAdmin: false);
         }
     }
 
@@ -449,7 +452,9 @@ public sealed partial class MainWindow : Window
 
     private void OnLiveFailed(string message)
     {
+        // Switching Live off and on again continues after the last event the failed subscription delivered.
         _live?.Dispose();
+        _resumeBookmark = _live?.ResumeBookmark ?? _resumeBookmark;
         _live = null;
         ShowProblem(message + " Press F5 to read the log again.", offerAdmin: false);
         UpdateStatus();
