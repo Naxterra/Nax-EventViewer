@@ -1,6 +1,6 @@
 # Must never happen
 
-This list names what Nax Event Viewer must never do. Every release report marks each item as verified by a named test or as not verified.
+This list names what Nax Event Viewer must never do. Every release report marks each item as verified by a named test or as not verified. The owner approved this list on 2026-10-30.
 
 1. The app never clears, deletes or changes an event log, never writes an event and never changes a log's settings.
 2. Reading a log or a saved .evtx file never changes that file.
