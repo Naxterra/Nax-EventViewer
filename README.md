@@ -54,4 +54,4 @@ Nax Event Viewer is source-available under the Nax Source-Available License 1.0.
 
 Versions published before this license, up to and including commit 2b65fb2, were published under the GNU General Public License, version 3, and remain available under it.
 
-The app bundles components from other authors, such as the .NET runtime and the Windows App SDK. They stay under their own licenses, which the installer places in the program folder as THIRD-PARTY-NOTICES.txt and the licenses folder.
+The app bundles components from other authors, such as the .NET runtime and the Windows App SDK. As section 8 of the license says, they stay under their own licenses, which the installer places in the program folder as THIRD-PARTY-NOTICES.txt and the licenses folder.

@@ -15,3 +15,5 @@ Copyright (c) 2026 Naxterra. All rights reserved.
 6. No warranty. The software is provided "as is", without warranty of any kind, express or implied. In no event shall the copyright holder be liable for any claim, damages or other liability arising from the software or its use.
 
 7. Termination. Any breach of this license ends your rights under it automatically.
+
+8. Third-party components. Components from other authors that are included with the software, such as the .NET runtime and the Windows App SDK, are not covered by this license. They remain under their own licenses, whose texts and notices are included with the software.
