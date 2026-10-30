@@ -20,6 +20,9 @@ public sealed class ReadSummary
     /// <summary>Logs of the overview that Windows does not let this user read, so their events are missing.</summary>
     public IReadOnlyList<string> LeftOut => _leftOut;
 
+    /// <summary>True when the overview could open none of its logs, whether they were locked, missing or disabled.</summary>
+    public bool NoLogReadable { get; internal set; }
+
     internal void AddLeftOut(string channel)
     {
         AccessDenied = true;
@@ -56,10 +59,14 @@ public static unsafe class EventReader
         if (source.Kind == LogSourceKind.ProblemsOverview)
         {
             // The overview query skips logs it cannot read without saying so; name them instead.
+            int readable = 0;
             foreach (string channel in source.Channels)
             {
-                if (ChannelCatalog.OpenError(channel) == Wevtapi.ErrorAccessDenied) summary.AddLeftOut(channel);
+                int error = ChannelCatalog.OpenError(channel);
+                if (error == 0) readable++;
+                else if (error == Wevtapi.ErrorAccessDenied) summary.AddLeftOut(channel);
             }
+            summary.NoLogReadable = source.Channels.Count > 0 && readable == 0;
         }
         var strings = new StringPool();
         using var renderer = new SystemRenderer(strings);

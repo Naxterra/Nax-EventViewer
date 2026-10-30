@@ -96,6 +96,16 @@ internal static class ReaderTests
                     Check.That(summary.LeftOut.SequenceEqual(["Security"]) && summary.AccessDenied, "Security must be named as left out, found: " + string.Join(", ", summary.LeftOut));
             });
 
+        yield return ("overview_where_no_log_can_be_opened_says_so",
+            "A problems overview over logs that do not exist reports that no log could be read, while an overview that includes System does not.",
+            () =>
+            {
+                ReadSummary none = EventReader.ReadRecords(LogSource.ForProblemsOverview(["Nax-Missing-Log-A", "Nax-Missing-Log-B/Operational"], TimeSpan.FromHours(1)), _ => { }, CancellationToken.None);
+                Check.That(none.NoLogReadable && none.Count == 0, "an overview over missing logs must report that no log could be read");
+                ReadSummary some = EventReader.ReadRecords(LogSource.ForProblemsOverview(["System", "Nax-Missing-Log-A"], TimeSpan.FromHours(1)), _ => { }, CancellationToken.None);
+                Check.That(!some.NoLogReadable, "an overview that includes System has a readable log");
+            });
+
         yield return ("live_subscription_delivers_new_event_with_message",
             "While the PowerShell log is watched, starting Windows PowerShell makes Windows write a start-up event, and it arrives within 30 seconds with its process ID and a formatted message.",
             () =>

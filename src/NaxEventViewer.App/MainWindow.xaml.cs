@@ -654,12 +654,12 @@ public sealed partial class MainWindow : Window
         Array.Copy(counts, _levelCounts, counts.Length);
         UpdateLevelButtons();
 
-        // In the overview, logs left out for lack of rights do not make the others unreadable, unless every log was left out.
-        int leftOut = _summary?.LeftOut.Count ?? 0;
-        bool someLeftOut = leftOut > 0;
-        bool allLeftOut = someLeftOut && _source is { Kind: LogSourceKind.ProblemsOverview } overview && leftOut >= overview.Channels.Count;
-        bool unreadable = _summary is { Count: 0 } summary && (summary.Problems.Count > 0 || (summary.AccessDenied && (!someLeftOut || allLeftOut)));
+        // In the overview, logs left out for lack of rights do not make the others unreadable, unless no log could be opened at all.
+        bool someLeftOut = _summary is { LeftOut.Count: > 0 };
+        bool unreadable = _summary is { Count: 0 } summary
+            && (summary.Problems.Count > 0 || summary.NoLogReadable || (summary.AccessDenied && !someLeftOut));
         EmptyText.Text = _all.Count > 0 ? "No events match the filter."
+            : _summary is { NoLogReadable: true, Problems.Count: 0, LeftOut.Count: 0 } ? "None of these logs could be opened."
             : unreadable ? "This log could not be read. The message above says why."
             : _source?.Kind == LogSourceKind.ProblemsOverview
                 ? someLeftOut
