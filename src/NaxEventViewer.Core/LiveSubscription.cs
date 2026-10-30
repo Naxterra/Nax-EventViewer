@@ -149,7 +149,8 @@ public sealed unsafe class LiveSubscription : IDisposable
             {
                 // The event is still delivered without its text; the detail pane formats it again when it is selected.
             }
-            // Only an event that is delivered moves the bookmark, so resuming never skips one.
+            // Only an event that is delivered moves the bookmark, so resuming never skips the events after it. An event
+            // whose fields Windows could not render at all is skipped, as the read skips it too.
             _last.MoveTo(evt);
         }
         if (item is not null)

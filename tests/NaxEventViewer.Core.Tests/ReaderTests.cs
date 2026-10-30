@@ -284,8 +284,10 @@ internal static class ReaderTests
                     using LiveSubscription live = LiveSubscription.Start("System", "<not a bookmark", fromOldest: false, new MessageStore(), _ => { }, _ => { });
                     throw new Exception("watching from an unusable bookmark should have failed");
                 }
-                catch (EventLogException)
+                catch (EventLogException ex)
                 {
+                    // The bookmark itself is rejected, before Windows is asked to watch at all.
+                    Check.That(ex.Message.Contains("could not continue watching"), "the error must come from the unusable bookmark: " + ex.Message);
                 }
             });
 

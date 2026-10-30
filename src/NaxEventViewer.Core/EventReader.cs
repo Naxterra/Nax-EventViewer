@@ -81,6 +81,7 @@ public static unsafe class EventReader
         using var renderer = new SystemRenderer(strings);
         using var newest = new Bookmark();
         bool trackNewest = source.Kind == LogSourceKind.Channel;
+        bool firstBatchSeen = false;
         foreach (QueryPart part in source.Parts())
         {
             ForEachBatch(part, summary, cancellation, (handles, count, newestFirst) =>
@@ -88,9 +89,12 @@ public static unsafe class EventReader
                 summary.NewestFirst = newestFirst;
                 if (trackNewest && count > 0)
                 {
-                    // Newest first: the first event of the first batch. Oldest first: the last event of each batch.
+                    // Newest first: the first event of the first batch only. If Windows refuses that bookmark, there
+                    // is none, and the window says that a few events may be missing, instead of resuming from an
+                    // older event and repeating the ones in between. Oldest first: the last event of each batch.
                     if (!newestFirst) newest.MoveTo(handles[count - 1]);
-                    else if (!newest.IsSet) newest.MoveTo(handles[0]);
+                    else if (!firstBatchSeen) newest.MoveTo(handles[0]);
+                    firstBatchSeen = true;
                 }
                 var batch = new List<EventItem>(count);
                 for (int i = 0; i < count; i++)

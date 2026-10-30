@@ -92,14 +92,16 @@ try {
     if ($install.ExitCode -ne 0) { $problems += "setup exited with code $($install.ExitCode)" }
     if (-not (Test-Path $exe)) { $problems += 'the program file is missing' }
     if (-not (Test-Path (Join-Path $installDir 'Assets\Nax-EventViewer.ico'))) { $problems += 'the icon file is missing' }
+    $license = Join-Path $installDir 'LICENSE.txt'
+    if (-not ((Test-Path $license) -and ((Get-Content $license -TotalCount 5) -match 'GNU GENERAL PUBLIC LICENSE'))) { $problems += 'the GPL license text is missing' }
     if (-not (Test-Path $uninstallKey)) { $problems += 'there is no entry in Installed apps' }
     if (-not (Test-Path $shortcut)) { $problems += 'the Start menu shortcut is missing' }
     if (-not (Test-Path $desktopShortcut)) { $problems += 'the desktop shortcut is missing' }
     if (-not (OpenWithValuePresent)) { $problems += 'the Open with entry for .evtx files is missing' }
     $command = if (Test-Path "$progIdKey\shell\open\command") { (Get-Item "$progIdKey\shell\open\command").GetValue('') } else { '' }
     if ($command -notlike "*$installDir\Nax-EventViewer.exe*") { $problems += "the Open with command is wrong: $command" }
-    Report 'install_for_current_user_puts_program_shortcuts_and_open_with_entry_in_place' `
-        'A silent installation for the current user installs the program, the Start menu and desktop shortcuts, the Installed apps entry and the Open with entry for .evtx files.' $problems
+    Report 'install_for_current_user_puts_program_license_shortcuts_and_open_with_entry_in_place' `
+        'A silent installation for the current user installs the program with its GPL license text, the Start menu and desktop shortcuts, the Installed apps entry and the Open with entry for .evtx files.' $problems
 
     $problems = @()
     if (-not (Test-Path (Join-Path $installDir 'coreclr.dll'))) { $problems += 'the .NET runtime (coreclr.dll) is not in the program folder' }

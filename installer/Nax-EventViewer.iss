@@ -30,6 +30,8 @@ MinVersion=10.0.22000
 OutputDir=..\artifacts\installer
 OutputBaseFilename=Nax-EventViewer-{#AppVersion}-setup
 SetupIconFile=..\src\NaxEventViewer.App\Assets\Nax-EventViewer.ico
+; The GPL needs no acceptance, so the license is shown as information with a Next button, not as an agreement.
+InfoBeforeFile=..\LICENSE
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}
 Compression=lzma2/ultra64
@@ -47,6 +49,7 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
 
 [Files]
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
