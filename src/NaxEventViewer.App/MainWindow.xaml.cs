@@ -73,6 +73,7 @@ public sealed partial class MainWindow : Window
         SetTitleBar(AppTitleBar);
         SystemBackdrop = new MicaBackdrop();
         AppWindow.Resize(new SizeInt32(1600, 940));
+        AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "Nax-EventViewer.ico"));
 
         _isElevated = new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
         ElevationText.Visibility = _isElevated ? Visibility.Visible : Visibility.Collapsed;
@@ -659,7 +660,7 @@ public sealed partial class MainWindow : Window
         bool unreadable = _summary is { Count: 0 } summary
             && (summary.Problems.Count > 0 || summary.NoLogReadable || (summary.AccessDenied && !someLeftOut));
         EmptyText.Text = _all.Count > 0 ? "No events match the filter."
-            : _summary is { NoLogReadable: true, Problems.Count: 0, LeftOut.Count: 0 } ? "None of these logs could be opened."
+            : _summary is { NoLogReadable: true } ? "None of these logs could be opened."
             : unreadable ? "This log could not be read. The message above says why."
             : _source?.Kind == LogSourceKind.ProblemsOverview
                 ? someLeftOut

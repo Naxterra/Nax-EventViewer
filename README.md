@@ -31,6 +31,19 @@ dotnet run --project tests/NaxEventViewer.Core.Tests
 
 The test runner prints every test with its scenario and result. Its exit code is the number of failed tests.
 
+## Installer
+
+The installer needs Inno Setup 7 (`winget install JRSoftware.InnoSetup.7`). The build script publishes the app as a self-contained x64 program and writes the installer to `artifacts\installer`.
+
+```
+.\build-installer.ps1
+.\tests\installer\InstallTests.ps1
+```
+
+The installer installs for the current user without administrator rights by default, and it can install for all users instead. It adds a Start menu shortcut, an optional desktop shortcut and, if chosen, an entry in the "Open with" menu of .evtx files, while the Windows Event Viewer stays the default program for them. Uninstalling removes all of this and offers to delete the crash log as well.
+
+The installer test installs the app silently into a temporary folder, checks what was installed, uninstalls it and checks that nothing is left behind. It refuses to run while the app is installed for the current user.
+
 ## Command line
 
 `Nax-EventViewer.exe --log "Microsoft-Windows-PowerShell/Operational"` opens a log, `--file path.evtx` (or just the path) opens a saved file, and `--overview` opens the problems overview.

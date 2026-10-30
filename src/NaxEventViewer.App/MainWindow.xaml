@@ -29,7 +29,7 @@
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <FontIcon Glyph="&#xE7C3;" FontSize="14" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+            <Image Source="ms-appx:///Assets/Nax-EventViewer.ico" Width="16" Height="16" VerticalAlignment="Center" />
             <TextBlock Grid.Column="1" Text="Nax Event Viewer" VerticalAlignment="Center" Style="{StaticResource CaptionTextBlockStyle}" />
             <TextBlock x:Name="ElevationText" Grid.Column="2" Text="Administrator" VerticalAlignment="Center" Visibility="Collapsed"
                        Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />

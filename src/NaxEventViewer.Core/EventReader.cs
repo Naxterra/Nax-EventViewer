@@ -20,7 +20,7 @@ public sealed class ReadSummary
     /// <summary>Logs of the overview that Windows does not let this user read, so their events are missing.</summary>
     public IReadOnlyList<string> LeftOut => _leftOut;
 
-    /// <summary>True when the overview could open none of its logs, whether they were locked, missing or disabled.</summary>
+    /// <summary>True when the overview could open none of its logs, for example because they were locked or missing.</summary>
     public bool NoLogReadable { get; internal set; }
 
     internal void AddLeftOut(string channel)
