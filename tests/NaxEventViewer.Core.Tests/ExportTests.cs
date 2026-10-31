@@ -153,6 +153,25 @@ internal static class ExportTests
                 Check.Equal(1, Directory.GetFiles(folder).Length);
             });
 
+        yield return ("clearing_a_log_that_does_not_exist_fails_and_saves_nothing",
+            "Clearing a log that does not exist, with a copy requested, fails with an error from Windows and leaves no copy, neither at the chosen path nor in the temporary folder.",
+            () =>
+            {
+                string folder = Fixtures.TempFolder("clear");
+                string backup = Path.Combine(folder, "copy.evtx");
+                int localBefore = Directory.GetFiles(Path.GetTempPath(), LogCleaner.LocalBackupPrefix + "*").Length;
+                try
+                {
+                    LogCleaner.Clear("Nax-Missing-Log-For-Clear-Test", backup);
+                    throw new Exception("clearing a missing log should have failed");
+                }
+                catch (EventLogException)
+                {
+                }
+                Check.Equal(0, Directory.GetFiles(folder).Length);
+                Check.Equal(localBefore, Directory.GetFiles(Path.GetTempPath(), LogCleaner.LocalBackupPrefix + "*").Length);
+            });
+
         yield return ("evtx_save_of_missing_file_fails_and_keeps_target",
             "Saving a .evtx file from a source that does not exist fails, keeps the existing target file unchanged and leaves no temporary file, neither next to the target nor in the temporary folder.",
             () =>

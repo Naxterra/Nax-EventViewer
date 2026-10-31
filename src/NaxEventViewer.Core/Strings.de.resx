@@ -32,4 +32,6 @@
   <data name="Message_UnnamedSource" xml:space="preserve"><value>einer unbenannten Quelle</value></data>
   <data name="Message_DataFollows" xml:space="preserve"><value>Das Ereignis enthält diese Daten:</value></data>
   <data name="Replace_NeedsMachineInstall" xml:space="preserve"><value>Die Windows-Ereignisanzeige kann nur durch eine Kopie ersetzt werden, die für alle Benutzer in einem Ordner installiert ist, den nur Administratoren ändern können.</value></data>
+  <data name="Error_Clear" xml:space="preserve"><value>Windows konnte {0} nicht leeren.</value></data>
+  <data name="Error_BackupKept" xml:space="preserve"><value>{0} wurde geleert, aber die Kopie konnte nicht als {1} gespeichert werden. Die Kopie liegt unter {2}. {3}</value></data>
 </root>

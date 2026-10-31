@@ -154,6 +154,7 @@ public sealed partial class MainWindow : Window
         SaveCsvItem.Text = Loc.Get("Command_SaveCsv");
         SaveCsvItem.KeyboardAcceleratorTextOverride = Loc.Get("Command_SaveCsvKey");
         SaveEvtxItem.Text = Loc.Get("Command_SaveEvtx");
+        Command(ClearButton, "Command_Clear", "Command_ClearTip");
         Command(AdminButton, "Command_Admin", "Command_AdminTip");
         Command(SettingsButton, "Command_Settings");
         LanguageMenu.Text = Loc.Get("Settings_Language");
@@ -432,6 +433,8 @@ public sealed partial class MainWindow : Window
         LogTitle.Text = source.Kind == LogSourceKind.File ? Loc.F("Title_SavedFile", source.DisplayName) : source.DisplayName;
         Title = $"{source.DisplayName} - Nax Event Viewer";
         SaveEvtxItem.IsEnabled = source.SupportsEvtxExport;
+        // Only a single log on this PC can be cleared; a saved file or the overview cannot.
+        ClearButton.IsEnabled = source.Kind == LogSourceKind.Channel;
         LiveToggle.IsEnabled = source.SupportsLiveUpdates;
 
         var load = new CancellationTokenSource();
@@ -1229,6 +1232,72 @@ public sealed partial class MainWindow : Window
         picker.FileTypeChoices.Add(typeName, [extension]);
         PickFileResult? result = await picker.PickSaveFileAsync();
         return result?.Path ?? "";
+    }
+
+    /// <summary>
+    /// Clears the open log, but only after the user confirmed it in a dialog whose default answer is Cancel. The user
+    /// can save a copy first; Windows then copies the events and empties the log in one step.
+    /// </summary>
+    private async void Clear_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (_source is not { Kind: LogSourceKind.Channel } source) return;
+            if (_recordsLoading)
+            {
+                ShowProblem(Loc.Get("Clear_StillReading"), offerAdmin: false);
+                return;
+            }
+            var dialog = new ContentDialog
+            {
+                XamlRoot = Content.XamlRoot,
+                Title = Loc.F("Clear_Title", source.DisplayName),
+                Content = new TextBlock { Text = Loc.F("Clear_Text", _all.Count.ToString("N0", CultureInfo.CurrentCulture), source.DisplayName), TextWrapping = TextWrapping.Wrap },
+                PrimaryButtonText = Loc.Get("Clear_SaveAndClear"),
+                SecondaryButtonText = Loc.Get("Clear_WithoutCopy"),
+                CloseButtonText = Loc.Get("Clear_Cancel"),
+                DefaultButton = ContentDialogButton.Close,
+            };
+            ContentDialogResult answer = await dialog.ShowAsync();
+            if (answer == ContentDialogResult.None || _closed || _source != source) return;
+
+            string? backup = null;
+            if (answer == ContentDialogResult.Primary)
+            {
+                backup = await PickSavePath(Loc.Get("Save_EvtxType"), ".evtx", "");
+                if (backup.Length == 0 || _closed || _source != source) return;
+            }
+
+            // Watching a log while it is emptied would only report that live updates stopped.
+            StopLoading();
+            try
+            {
+                await Task.Run(() => LogCleaner.Clear(source.Path, backup));
+            }
+            catch (EventLogException ex)
+            {
+                if (_closed) return;
+                Open(source);
+                ShowProblem(ex.IsAccessDenied ? Loc.F("Clear_NeedsAdmin", source.DisplayName) : Loc.F("Clear_Failed", ex.Message), offerAdmin: ex.IsAccessDenied && !_isElevated);
+                return;
+            }
+            catch (BackupNotSavedException ex)
+            {
+                if (_closed) return;
+                Open(source);
+                ShowProblem(ex.Message, offerAdmin: false);
+                return;
+            }
+            if (_closed) return;
+            Open(source);
+            ShowInfo(backup is null ? Loc.F("Clear_Done", source.DisplayName) : Loc.F("Clear_DoneWithCopy", source.DisplayName, backup));
+        }
+        catch (Exception ex)
+        {
+            // This is an async void handler, so an exception that escaped here would end the app.
+            CrashLog.Write(ex);
+            ShowProblem(Loc.F("Clear_Failed", ex.Message), offerAdmin: false);
+        }
     }
 
     /// <summary>Runs a save off the UI thread and shows the message it returns, or why it failed.</summary>

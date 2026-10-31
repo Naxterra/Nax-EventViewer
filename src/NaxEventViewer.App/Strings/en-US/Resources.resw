@@ -105,4 +105,16 @@
   <data name="Save_SavedFile" xml:space="preserve"><value>Saved {0}.</value></data>
   <data name="Save_Failed" xml:space="preserve"><value>The file could not be saved. {0}</value></data>
   <data name="Save_Nothing" xml:space="preserve"><value>Nothing was saved. {0}</value></data>
+  <data name="Command_Clear" xml:space="preserve"><value>Clear log</value></data>
+  <data name="Command_ClearTip" xml:space="preserve"><value>Delete all events of this log, after saving a copy if you like</value></data>
+  <data name="Clear_Title" xml:space="preserve"><value>Clear {0}?</value></data>
+  <data name="Clear_Text" xml:space="preserve"><value>All {0} events in {1} will be deleted for good. "Save and clear" saves them to a .evtx file first. Windows keeps writing new events into the log afterwards.</value></data>
+  <data name="Clear_SaveAndClear" xml:space="preserve"><value>Save and clear</value></data>
+  <data name="Clear_WithoutCopy" xml:space="preserve"><value>Clear</value></data>
+  <data name="Clear_Cancel" xml:space="preserve"><value>Cancel</value></data>
+  <data name="Clear_Done" xml:space="preserve"><value>{0} was cleared.</value></data>
+  <data name="Clear_DoneWithCopy" xml:space="preserve"><value>{0} was cleared, and its events were saved to {1}.</value></data>
+  <data name="Clear_NeedsAdmin" xml:space="preserve"><value>Windows only lets administrators clear {0}. Nothing was deleted.</value></data>
+  <data name="Clear_Failed" xml:space="preserve"><value>The log could not be cleared, so nothing was deleted. {0}</value></data>
+  <data name="Clear_StillReading" xml:space="preserve"><value>The log is still being read. Clear it once every event has been read.</value></data>
 </root>

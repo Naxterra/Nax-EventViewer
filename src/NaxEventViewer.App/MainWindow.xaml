@@ -65,6 +65,7 @@
                         </MenuFlyout>
                     </AppBarButton.Flyout>
                 </AppBarButton>
+                <AppBarButton x:Name="ClearButton" Icon="Delete" Click="Clear_Click" />
                 <AppBarButton x:Name="AdminButton" Click="Admin_Click">
                     <AppBarButton.Icon>
                         <FontIcon Glyph="&#xE7EF;" />

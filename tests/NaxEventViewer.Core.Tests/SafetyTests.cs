@@ -7,9 +7,9 @@ namespace NaxEventViewer.Core.Tests;
 /// <summary>Guards that keep the app a pure reader of event logs.</summary>
 internal static class SafetyTests
 {
+    // EvtClearLog is not in this list: the user may clear a log on purpose, which the test below confines to one place.
     private static readonly string[] ChangingFunctions =
     [
-        "EvtClearLog",
         "EvtSetChannelConfigProperty",
         "EvtSaveChannelConfig",
         "EvtArchiveExportedLog",
@@ -23,8 +23,8 @@ internal static class SafetyTests
 
     public static IEnumerable<(string Name, string Scenario, Action Body)> All()
     {
-        yield return ("core_imports_no_function_that_clears_writes_or_reconfigures_a_log",
-            "The core library imports no Windows function that clears a log, writes an event or changes a log's settings, so it cannot change any log.",
+        yield return ("core_imports_no_function_that_writes_events_or_reconfigures_a_log",
+            "The core library imports no Windows function that writes an event or changes a log's settings. Clearing a log is checked by the next test.",
             () =>
             {
                 string[] imported = ImportedFunctions(typeof(EventItem).Assembly.Location);
@@ -32,9 +32,36 @@ internal static class SafetyTests
                 CheckNoChangingFunction(imported);
             });
 
-        yield return ("app_imports_no_function_that_clears_writes_or_reconfigures_a_log",
-            "The app's own program file imports no Windows function that clears a log, writes an event or changes a log's settings either.",
+        yield return ("app_imports_no_function_that_writes_events_or_reconfigures_a_log",
+            "The app's own program file imports no Windows function that writes an event or changes a log's settings either.",
             () => CheckNoChangingFunction(ImportedFunctions(AppAssemblyPath())));
+
+        yield return ("logs_are_cleared_only_from_the_confirmed_clear_command",
+            "Only LogCleaner calls the Windows function that clears a log, and the app calls LogCleaner in exactly one place: the Clear log command, after a confirmation dialog whose default answer is Cancel.",
+            () =>
+            {
+                string src = Path.Combine(Fixtures.RepositoryRoot, "src");
+                var sources = Directory.EnumerateFiles(src, "*.cs", SearchOption.AllDirectories)
+                    .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
+                    .ToDictionary(f => Path.GetRelativePath(src, f), File.ReadAllText);
+
+                string[] clearCallers = sources.Where(s => s.Value.Contains("EvtClearLog(")).Select(s => s.Key).Order().ToArray();
+                Check.That(clearCallers.SequenceEqual([Path.Combine("NaxEventViewer.Core", "LogCleaner.cs"), Path.Combine("NaxEventViewer.Core", "Native", "Wevtapi.cs")]),
+                    "EvtClearLog appears in: " + string.Join(", ", clearCallers));
+
+                var appCalls = sources.Where(s => !s.Key.EndsWith("LogCleaner.cs", StringComparison.Ordinal))
+                    .SelectMany(s => System.Text.RegularExpressions.Regex.Matches(s.Value, @"LogCleaner\.Clear\(").Select(_ => s.Key)).ToArray();
+                Check.That(appCalls.SequenceEqual([Path.Combine("NaxEventViewer.App", "MainWindow.xaml.cs")]), "LogCleaner.Clear is called from: " + string.Join(", ", appCalls));
+
+                string window = sources[Path.Combine("NaxEventViewer.App", "MainWindow.xaml.cs")];
+                int handler = window.IndexOf("private async void Clear_Click(", StringComparison.Ordinal);
+                int call = window.IndexOf("LogCleaner.Clear(", StringComparison.Ordinal);
+                int nextMember = window.IndexOf("    private ", handler + 1, StringComparison.Ordinal);
+                Check.That(handler >= 0 && call > handler && call < nextMember, "the call is inside the Clear log command");
+                string body = window[handler..nextMember];
+                Check.That(body.Contains("DefaultButton = ContentDialogButton.Close") && body.Contains("if (answer == ContentDialogResult.None"),
+                    "the command asks first, with Cancel as the default, and stops when the user cancels");
+            });
 
         yield return ("core_and_app_have_no_reference_to_the_classic_eventlog_class",
             "Neither the core library nor the app uses System.Diagnostics.EventLog, whose Clear, WriteEntry and Delete methods could change logs.",

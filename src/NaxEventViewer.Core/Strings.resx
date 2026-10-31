@@ -32,4 +32,6 @@
   <data name="Message_UnnamedSource" xml:space="preserve"><value>an unnamed source</value></data>
   <data name="Message_DataFollows" xml:space="preserve"><value>The event contains this data:</value></data>
   <data name="Replace_NeedsMachineInstall" xml:space="preserve"><value>The Windows Event Viewer can only be replaced by a copy installed for all users, in a folder that only administrators can change.</value></data>
+  <data name="Error_Clear" xml:space="preserve"><value>Windows could not clear {0}.</value></data>
+  <data name="Error_BackupKept" xml:space="preserve"><value>{0} was cleared, but its copy could not be saved as {1}. The copy is kept at {2}. {3}</value></data>
 </root>

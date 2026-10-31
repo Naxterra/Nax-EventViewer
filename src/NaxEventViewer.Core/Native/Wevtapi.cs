@@ -144,6 +144,11 @@ internal static unsafe partial class Wevtapi
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool EvtUpdateBookmark(nint bookmark, nint evt);
 
+    // Only LogCleaner may call this, and only when the user asked for the log to be cleared (see SafetyTests).
+    [LibraryImport(Dll, SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool EvtClearLog(nint session, string channelPath, string? targetFilePath, int flags);
+
     [LibraryImport(Dll, SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     public static partial nint EvtSubscribe(nint session, nint signalEvent, string? channelPath, string? query, nint bookmark, nint context, delegate* unmanaged<int, nint, nint, int> callback, int flags);
 
