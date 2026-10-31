@@ -39,7 +39,8 @@
     <ProjectReference Include="..\NaxEventViewer.Core\NaxEventViewer.Core.csproj" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2270" />
     <!-- Only the parts of the Windows App SDK the app uses. The whole SDK would also bring its AI and machine-learning
-         components, about 40 MB that every start and every virus scan has to get past. -->
+         components, about 40 MB that every start and every virus scan has to get past. The versions are the ones the
+         Microsoft.WindowsAppSDK 2.2.0 bundle pins, so the parts always match each other. -->
     <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.2.1" />
     <PackageReference Include="Microsoft.WindowsAppSDK.Foundation" Version="2.1.0" />
     <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="2.0.15" />

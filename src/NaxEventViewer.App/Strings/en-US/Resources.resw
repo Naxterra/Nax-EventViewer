@@ -117,4 +117,5 @@
   <data name="Clear_NeedsAdmin" xml:space="preserve"><value>Windows only lets administrators clear {0}. Nothing was deleted.</value></data>
   <data name="Clear_Failed" xml:space="preserve"><value>The log could not be cleared, so nothing was deleted. {0}</value></data>
   <data name="Clear_StillReading" xml:space="preserve"><value>The log is still being read. Clear it once every event has been read.</value></data>
+  <data name="Clear_Unexpected" xml:space="preserve"><value>Clearing {0} stopped with an unexpected error. Check the list to see whether the log was emptied. {1}</value></data>
 </root>

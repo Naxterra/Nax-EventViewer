@@ -117,4 +117,5 @@
   <data name="Clear_NeedsAdmin" xml:space="preserve"><value>Windows erlaubt nur Administratoren, {0} zu leeren. Es wurde nichts gelöscht.</value></data>
   <data name="Clear_Failed" xml:space="preserve"><value>Das Protokoll konnte nicht geleert werden, daher wurde nichts gelöscht. {0}</value></data>
   <data name="Clear_StillReading" xml:space="preserve"><value>Das Protokoll wird noch gelesen. Leeren Sie es, sobald alle Ereignisse gelesen sind.</value></data>
+  <data name="Clear_Unexpected" xml:space="preserve"><value>Das Leeren von {0} wurde durch einen unerwarteten Fehler abgebrochen. Prüfen Sie in der Liste, ob das Protokoll geleert wurde. {1}</value></data>
 </root>

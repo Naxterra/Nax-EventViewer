@@ -41,9 +41,10 @@ public static class LogCleaner
                 input.CopyTo(output, 1 << 20);
             });
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex)
         {
-            // The log is already empty, so the local copy is now the only one and must stay.
+            // Whatever went wrong, the log is already empty, so the local copy is now the only one: it must stay, and
+            // the caller must learn where it is.
             throw new BackupNotSavedException(localCopy, CoreText.F("Error_BackupKept", channel, backupPath, localCopy, ex.Message), ex);
         }
         AtomicFile.TryDelete(localCopy);

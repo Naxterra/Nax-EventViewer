@@ -1240,9 +1240,13 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private async void Clear_Click(object sender, RoutedEventArgs e)
     {
+        // One clear at a time: a second click while one runs would ask again about a log that is being emptied.
+        if (_clearing || _source is not { Kind: LogSourceKind.Channel } source) return;
+        _clearing = true;
+        ClearButton.IsEnabled = false;
+        bool started = false;
         try
         {
-            if (_source is not { Kind: LogSourceKind.Channel } source) return;
             if (_recordsLoading)
             {
                 ShowProblem(Loc.Get("Clear_StillReading"), offerAdmin: false);
@@ -1270,36 +1274,51 @@ public sealed partial class MainWindow : Window
 
             // Watching a log while it is emptied would only report that live updates stopped.
             StopLoading();
+            started = true;
+            string? problem = null, done = null;
+            bool offerAdmin = false;
             try
             {
                 await Task.Run(() => LogCleaner.Clear(source.Path, backup));
+                done = backup is null ? Loc.F("Clear_Done", source.DisplayName) : Loc.F("Clear_DoneWithCopy", source.DisplayName, backup);
             }
             catch (EventLogException ex)
             {
-                if (_closed) return;
-                Open(source);
-                ShowProblem(ex.IsAccessDenied ? Loc.F("Clear_NeedsAdmin", source.DisplayName) : Loc.F("Clear_Failed", ex.Message), offerAdmin: ex.IsAccessDenied && !_isElevated);
-                return;
+                // Windows refused before deleting anything.
+                problem = ex.IsAccessDenied ? Loc.F("Clear_NeedsAdmin", source.DisplayName) : Loc.F("Clear_Failed", ex.Message);
+                offerAdmin = ex.IsAccessDenied && !_isElevated;
             }
             catch (BackupNotSavedException ex)
             {
-                if (_closed) return;
-                Open(source);
-                ShowProblem(ex.Message, offerAdmin: false);
-                return;
+                // The log is empty and the message names where its copy is.
+                problem = ex.Message;
             }
-            if (_closed) return;
-            Open(source);
-            ShowInfo(backup is null ? Loc.F("Clear_Done", source.DisplayName) : Loc.F("Clear_DoneWithCopy", source.DisplayName, backup));
+            ReopenAfterClear(source);
+            if (problem is not null) ShowProblem(problem, offerAdmin);
+            else ShowInfo(done!);
         }
         catch (Exception ex)
         {
-            // This is an async void handler, so an exception that escaped here would end the app.
+            // This is an async void handler, so an exception that escaped here would end the app. Whether the log was
+            // emptied is unknown here, so the message does not claim either, and the log is read again to show it.
             CrashLog.Write(ex);
-            ShowProblem(Loc.F("Clear_Failed", ex.Message), offerAdmin: false);
+            if (started) ReopenAfterClear(source);
+            ShowProblem(Loc.F("Clear_Unexpected", source.DisplayName, ex.Message), offerAdmin: false);
+        }
+        finally
+        {
+            _clearing = false;
+            if (!_closed) ClearButton.IsEnabled = _source?.Kind == LogSourceKind.Channel;
         }
     }
 
+    private bool _clearing;
+
+    /// <summary>Reads the cleared log again, unless the user has opened another one meanwhile.</summary>
+    private void ReopenAfterClear(LogSource source)
+    {
+        if (!_closed && _source == source) Open(source);
+    }
     /// <summary>Runs a save off the UI thread and shows the message it returns, or why it failed.</summary>
     private async Task RunSave(Func<string> save)
     {
@@ -1350,6 +1369,7 @@ public sealed partial class MainWindow : Window
 
     private void ShowInfo(string message)
     {
+        if (_closed) return;
         ProblemBar.Severity = InfoBarSeverity.Success;
         ProblemBar.Message = message;
         ProblemAdminButton.Visibility = Visibility.Collapsed;
@@ -1358,6 +1378,8 @@ public sealed partial class MainWindow : Window
 
     private void ShowProblem(string message, bool offerAdmin)
     {
+        // A failure that arrives after the window closed has nowhere to be shown; changing the bar then would end the app.
+        if (_closed) return;
         ProblemBar.Severity = InfoBarSeverity.Warning;
         ProblemBar.Message = message;
         ProblemAdminButton.Visibility = offerAdmin ? Visibility.Visible : Visibility.Collapsed;
