@@ -112,7 +112,20 @@ public sealed partial class MainWindow : Window
         BuildTree();
         LoadChannelInfoInBackground();
         OpenStartupTarget(Program.Startup);
+        AppWindow.Closing += (_, args) => args.Cancel = RefuseWhileClearing();
         Closed += (_, _) => OnClosed();
+    }
+
+    /// <summary>
+    /// True while logs are being emptied. Ending the app then could stop a clear between emptying a log and moving its
+    /// copy out of the temporary folder, so closing and restarting wait until the clear has finished.
+    /// </summary>
+    private bool _clearRunning;
+
+    private bool RefuseWhileClearing()
+    {
+        if (_clearRunning) ShowProblem(Loc.Get("Clear_WaitBeforeClosing"), offerAdmin: false);
+        return _clearRunning;
     }
 
     /// <summary>
@@ -191,7 +204,7 @@ public sealed partial class MainWindow : Window
     /// <summary>Saves the chosen language and restarts the app in it, on the same log.</summary>
     private void Language_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not RadioMenuFlyoutItem { Tag: string language } || language == Program.Settings.Language) return;
+        if (sender is not RadioMenuFlyoutItem { Tag: string language } || language == Program.Settings.Language || RefuseWhileClearing()) return;
         string previous = Program.Settings.Language;
         try
         {
@@ -356,6 +369,137 @@ public sealed partial class MainWindow : Window
                 Open(CreateOverviewSource());
                 break;
         }
+    }
+
+    /// <summary>The right-click menu of a log, a saved file or the overview. Folders have none.</summary>
+    private void LogTree_ContextRequested(UIElement sender, ContextRequestedEventArgs args)
+    {
+        if (FindAncestor<TreeViewItem>(args.OriginalSource as DependencyObject)?.DataContext is not LogNode node) return;
+        var menu = new MenuFlyout();
+        switch (node.Kind)
+        {
+            case LogNodeKind.Channel:
+                // Saving and clearing act on the log that was right-clicked, which need not be the open one.
+                LogSource source = SourceForChannel(node.Path);
+                menu.Items.Add(MenuItem("Menu_Open", "", (_, _) => Open(SourceForChannel(node.Path))));
+                menu.Items.Add(MenuItem("Menu_SaveEvtx", "", SaveEvtx_Click, source));
+                menu.Items.Add(MenuItem("Menu_ClearLog", "", Clear_Click, new ClearRequest(source.DisplayName, [source], IsFolder: false), enabled: !_clearing));
+                menu.Items.Add(new MenuFlyoutSeparator());
+                menu.Items.Add(MenuItem("Menu_CopyLogName", "", (_, _) => CopyText(node.Path)));
+                break;
+            case LogNodeKind.File:
+                menu.Items.Add(MenuItem("Menu_Open", "", (_, _) => Open(LogSource.ForFile(node.Path))));
+                menu.Items.Add(new MenuFlyoutSeparator());
+                menu.Items.Add(MenuItem("Menu_CopyPath", "", (_, _) => CopyText(node.Path)));
+                menu.Items.Add(MenuItem("Menu_ShowInFolder", "", (_, _) => ShowInFolder(node.Path)));
+                break;
+            case LogNodeKind.Overview:
+                menu.Items.Add(MenuItem("Menu_Open", "", (_, _) => Open(CreateOverviewSource())));
+                break;
+            case LogNodeKind.Folder when node.Children.Count > 0:
+                menu.Items.Add(node.IsExpanded
+                    ? MenuItem("Menu_Collapse", "", (_, _) => node.IsExpanded = false)
+                    : MenuItem("Menu_Expand", "", (_, _) => node.IsExpanded = true));
+                menu.Items.Add(MenuItem("Menu_ExpandAll", "", (_, _) => SetExpanded(node, true)));
+                menu.Items.Add(MenuItem("Menu_CollapseAll", "", (_, _) => SetExpanded(node, false)));
+                // Clearing a folder covers the logs the tree shows in it, at every level below.
+                List<LogSource> folderLogs = [.. Descendants(node).Where(n => n.Kind == LogNodeKind.Channel)
+                    .Select(n => n.Path).Distinct(StringComparer.OrdinalIgnoreCase).Select(SourceForChannel)];
+                if (folderLogs.Count > 0)
+                {
+                    menu.Items.Add(new MenuFlyoutSeparator());
+                    menu.Items.Add(MenuItem("Menu_ClearFolder", "", Clear_Click, new ClearRequest(node.Name, folderLogs, IsFolder: true), enabled: !_clearing));
+                }
+                break;
+            default:
+                return;
+        }
+        args.Handled = true;
+        ShowMenu(menu, sender, args);
+    }
+
+    private static IEnumerable<LogNode> Descendants(LogNode node)
+    {
+        foreach (LogNode child in node.Children)
+        {
+            yield return child;
+            foreach (LogNode below in Descendants(child)) yield return below;
+        }
+    }
+
+    /// <summary>Opens or closes a folder together with every folder inside it.</summary>
+    private static void SetExpanded(LogNode folder, bool expanded)
+    {
+        folder.IsExpanded = expanded;
+        foreach (LogNode child in folder.Children)
+            if (child.Kind == LogNodeKind.Folder) SetExpanded(child, expanded);
+    }
+
+    /// <summary>The open log if it is this channel, so that commands on it also update the list; otherwise a new source.</summary>
+    private LogSource SourceForChannel(string channel) =>
+        _source is { Kind: LogSourceKind.Channel } open && string.Equals(open.Path, channel, StringComparison.OrdinalIgnoreCase)
+            ? open
+            : LogSource.ForChannel(channel);
+
+    private void ShowInFolder(string path)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = false });
+        }
+        catch (Exception ex)
+        {
+            ShowProblem(Loc.F("Problem_OpenFailed", ex.Message), offerAdmin: false);
+        }
+    }
+
+    /// <summary>Reads the number of events of a log again and shows it in the tree, after the log was cleared.</summary>
+    private void RecountLog(string channel)
+    {
+        Task.Run(() => ChannelCatalog.CountRecords(channel)).ContinueWith(task =>
+        {
+            if (!task.IsCompletedSuccessfully) return;
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (_closed) return;
+                foreach (LogNode node in ChannelNodes(_roots, channel)) node.CountText = LogNode.FormatCount(task.Result);
+            });
+        }, TaskScheduler.Default);
+    }
+
+    private static IEnumerable<LogNode> ChannelNodes(IEnumerable<LogNode> nodes, string channel)
+    {
+        foreach (LogNode node in nodes)
+        {
+            if (node.Kind == LogNodeKind.Channel && string.Equals(node.Path, channel, StringComparison.OrdinalIgnoreCase)) yield return node;
+            foreach (LogNode match in ChannelNodes(node.Children, channel)) yield return match;
+        }
+    }
+
+    // ----- Right-click menus -----
+
+    private static MenuFlyoutItem MenuItem(string textKey, string glyph, RoutedEventHandler click, object? tag = null, bool enabled = true) =>
+        MenuItemWithText(Loc.Get(textKey), glyph, click, tag, enabled);
+
+    private static MenuFlyoutItem MenuItemWithText(string text, string glyph, RoutedEventHandler click, object? tag = null, bool enabled = true)
+    {
+        var item = new MenuFlyoutItem { Text = text, Icon = new FontIcon { Glyph = glyph }, Tag = tag, IsEnabled = enabled };
+        item.Click += click;
+        return item;
+    }
+
+    /// <summary>Shows a menu at the pointer, or next to the element when the menu key or Shift+F10 opened it.</summary>
+    private static void ShowMenu(MenuFlyout menu, UIElement sender, ContextRequestedEventArgs args)
+    {
+        if (args.TryGetPosition(sender, out Windows.Foundation.Point point)) menu.ShowAt(sender, point);
+        else menu.ShowAt(args.OriginalSource as FrameworkElement ?? (FrameworkElement)sender);
+    }
+
+    private static T? FindAncestor<T>(DependencyObject? element) where T : DependencyObject
+    {
+        for (; element is not null; element = VisualTreeHelper.GetParent(element))
+            if (element is T match) return match;
+        return null;
     }
 
     /// <summary>The overview covers the Windows logs and every enabled administrative log that is not known to be empty.</summary>
@@ -1076,11 +1220,69 @@ public sealed partial class MainWindow : Window
 
     // ----- Copy, open, save -----
 
-    private async void EventList_KeyDown(object sender, KeyRoutedEventArgs e)
+    private void EventList_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         bool control = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control).HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
         if (!control || e.Key != VirtualKey.C) return;
         e.Handled = true;
+        CopySelectedEvents();
+    }
+
+    /// <summary>The right-click menu of the event list. It acts on the selected events.</summary>
+    private void EventList_ContextRequested(UIElement sender, ContextRequestedEventArgs args)
+    {
+        // A right click on an event that is not selected selects only that event, as in Explorer.
+        if (FindAncestor<ListViewItem>(args.OriginalSource as DependencyObject) is { } container)
+        {
+            int index = EventList.IndexFromContainer(container);
+            if (index >= 0 && !EventList.SelectedRanges.Any(r => index >= r.FirstIndex && index <= r.LastIndex))
+                EventList.SelectedIndex = index;
+        }
+        long selected = EventList.SelectedRanges.Sum(r => (long)r.Length);
+        if (selected == 0) return;
+        args.Handled = true;
+
+        var menu = new MenuFlyout();
+        MenuFlyoutItem copy = MenuItem(selected == 1 ? "Menu_CopyEvent" : "Menu_CopyEvents", "", (_, _) => CopySelectedEvents());
+        copy.KeyboardAcceleratorTextOverride = Loc.Get("Menu_CopyKey");
+        menu.Items.Add(copy);
+        if (selected == 1 && EventList.SelectedItem is EventItem item)
+        {
+            // The detail pane shows the selected event, so its text is what gets copied.
+            menu.Items.Add(MenuItem("Menu_CopyDetails", "", (_, _) => { if (_detailItem == item) CopyDetail_Click(sender, new RoutedEventArgs()); }));
+            menu.Items.Add(new MenuFlyoutSeparator());
+            string id = item.EventId.ToString(CultureInfo.InvariantCulture);
+            menu.Items.Add(MenuItemWithText(Loc.F("Menu_OnlyEventId", id), "", (_, _) => SetEventIdFilter(id)));
+            menu.Items.Add(MenuItemWithText(Loc.F("Menu_HideEventId", id), "", (_, _) =>
+            {
+                string current = EventIdBox.Text.Trim();
+                SetEventIdFilter(current.Length == 0 ? "-" + id : current + ", -" + id);
+            }));
+        }
+        bool filtered = SearchBox.Text.Length > 0 || EventIdBox.Text.Length > 0 || TimeBox.SelectedIndex > 0 || _levelButtons.Values.Any(b => b.IsChecked != true);
+        menu.Items.Add(new MenuFlyoutSeparator());
+        menu.Items.Add(MenuItem("Menu_ResetFilters", "", (_, _) => ResetFilters(), enabled: filtered));
+        ShowMenu(menu, sender, args);
+    }
+
+    private void SetEventIdFilter(string text)
+    {
+        EventIdBox.Text = text;
+        ApplyFilter();
+    }
+
+    private void ResetFilters()
+    {
+        SearchBox.Text = "";
+        EventIdBox.Text = "";
+        TimeBox.SelectedIndex = 0;
+        foreach (ToggleButton button in _levelButtons.Values) button.IsChecked = true;
+        UpdateLevelButtons();
+        ApplyFilter();
+    }
+
+    private async void CopySelectedEvents()
+    {
         try
         {
             // The selected ranges are cheap to read even when a million rows are selected; the text is built off the UI thread.
@@ -1203,8 +1405,10 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            if (_source is not { SupportsEvtxExport: true } source) return;
-            string path = await PickSavePath(Loc.Get("Save_EvtxType"), ".evtx", "");
+            // The toolbar saves the open log, and the log tree's menu names the log it was opened on.
+            LogSource? target = sender is FrameworkElement { Tag: LogSource tagged } ? tagged : _source;
+            if (target is not { SupportsEvtxExport: true } source) return;
+            string path = await PickSavePath(Loc.Get("Save_EvtxType"), ".evtx", "", source.DisplayName);
             if (path.Length == 0) return;
             await RunSave(() =>
             {
@@ -1219,10 +1423,12 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async Task<string> PickSavePath(string typeName, string extension, string suffix)
+    // "Microsoft-Windows-PowerShell/Operational" becomes "Microsoft-Windows-PowerShell-Operational".
+    private static string SafeFileName(string name) => string.Concat(name.Replace('/', '-').Split(Path.GetInvalidFileNameChars()));
+
+    private async Task<string> PickSavePath(string typeName, string extension, string suffix, string? logName = null)
     {
-        // "Microsoft-Windows-PowerShell/Operational" becomes "Microsoft-Windows-PowerShell-Operational".
-        string baseName = string.Concat((_source?.DisplayName ?? "events").Replace('/', '-').Split(Path.GetInvalidFileNameChars()));
+        string baseName = SafeFileName(logName ?? _source?.DisplayName ?? "events");
         if (baseName.EndsWith(extension, StringComparison.OrdinalIgnoreCase)) baseName = baseName[..^extension.Length];
         var picker = new FileSavePicker(AppWindow.Id)
         {
@@ -1235,78 +1441,115 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Clears the open log, but only after the user confirmed it in a dialog whose default answer is Cancel. The user
-    /// can save a copy first; Windows then copies the events and empties the log in one step.
+    /// Clears a log or every log of a folder, but only after the user confirmed it in a dialog whose default answer is
+    /// Cancel. The user can save copies first; Windows then copies each log's events and empties it in one step.
     /// </summary>
     private async void Clear_Click(object sender, RoutedEventArgs e)
     {
-        // One clear at a time: a second click while one runs would ask again about a log that is being emptied.
-        if (_clearing || _source is not { Kind: LogSourceKind.Channel } source) return;
+        // The toolbar clears the open log, and the log tree's menu names the log or folder it was opened on.
+        ClearRequest? request = sender is FrameworkElement { Tag: ClearRequest tagged } ? tagged
+            : _source is { Kind: LogSourceKind.Channel } current ? new ClearRequest(current.DisplayName, [current], IsFolder: false) : null;
+        // One clear at a time: a second click while one runs would ask again about logs that are being emptied.
+        if (_clearing || request is null || request.Logs.Count == 0) return;
         _clearing = true;
         ClearButton.IsEnabled = false;
         bool started = false;
+        List<LogSource> logs = [.. request.Logs];
+        // The open log is read again afterwards, and the question is dropped if the user opens another log meanwhile.
+        LogSource? openLog = _source is { } shown && logs.Contains(shown) ? shown : null;
+        bool OpenLogChanged() => _closed || (openLog is not null && _source != openLog);
         try
         {
-            if (_recordsLoading)
+            if (openLog is not null && _recordsLoading)
             {
                 ShowProblem(Loc.Get("Clear_StillReading"), offerAdmin: false);
                 return;
             }
+            int openCount = _all.Count;
+            long?[] counts = await Task.Run(() => logs.AsParallel().AsOrdered().WithDegreeOfParallelism(4)
+                .Select(log => log == openLog ? openCount : ChannelCatalog.CountRecords(log.Path)).ToArray());
+            if (OpenLogChanged()) return;
+            if (request.IsFolder)
+            {
+                // Empty logs need no clearing, and a copy of one would be an empty file.
+                var withEvents = logs.Zip(counts).Where(pair => pair.Second is not 0).ToList();
+                logs = withEvents.Select(pair => pair.First).ToList();
+                counts = withEvents.Select(pair => pair.Second).ToArray();
+                if (logs.Count == 0)
+                {
+                    ShowInfo(Loc.F("Clear_FolderEmpty", request.Name));
+                    return;
+                }
+            }
             var dialog = new ContentDialog
             {
                 XamlRoot = Content.XamlRoot,
-                Title = Loc.F("Clear_Title", source.DisplayName),
-                Content = new TextBlock { Text = Loc.F("Clear_Text", _all.Count.ToString("N0", CultureInfo.CurrentCulture), source.DisplayName), TextWrapping = TextWrapping.Wrap },
+                Title = request.IsFolder ? Loc.F("Clear_FolderTitle", Number(logs.Count), request.Name) : Loc.F("Clear_Title", request.Name),
+                Content = new TextBlock { Text = ClearQuestion(request, logs.Count, counts), TextWrapping = TextWrapping.Wrap },
                 PrimaryButtonText = Loc.Get("Clear_SaveAndClear"),
                 SecondaryButtonText = Loc.Get("Clear_WithoutCopy"),
                 CloseButtonText = Loc.Get("Clear_Cancel"),
                 DefaultButton = ContentDialogButton.Close,
             };
             ContentDialogResult answer = await dialog.ShowAsync();
-            if (answer == ContentDialogResult.None || _closed || _source != source) return;
+            if (answer == ContentDialogResult.None || OpenLogChanged()) return;
 
-            string? backup = null;
+            string?[] backups = new string?[logs.Count];
+            string? backupFolder = null;
             if (answer == ContentDialogResult.Primary)
             {
-                backup = await PickSavePath(Loc.Get("Save_EvtxType"), ".evtx", "");
-                if (backup.Length == 0 || _closed || _source != source) return;
+                if (request.IsFolder)
+                {
+                    backupFolder = await PickFolder();
+                    if (backupFolder.Length == 0 || OpenLogChanged()) return;
+                    backups = BackupPaths(backupFolder, logs);
+                }
+                else
+                {
+                    string backup = await PickSavePath(Loc.Get("Save_EvtxType"), ".evtx", "", request.Name);
+                    if (backup.Length == 0 || OpenLogChanged()) return;
+                    backups[0] = backup;
+                }
             }
 
             // Watching a log while it is emptied would only report that live updates stopped.
-            StopLoading();
+            if (openLog is not null) StopLoading();
             started = true;
-            string? problem = null, done = null;
-            bool offerAdmin = false;
-            try
+            _clearRunning = true;
+            // Each log is cleared on its own and every failure is kept with its log, so a log that Windows refuses or an
+            // unexpected error does not stop the others or hide where an earlier log's copy was kept.
+            Exception?[] failures = await Task.Run(() => logs.Select(Exception? (log, i) =>
             {
-                await Task.Run(() => LogCleaner.Clear(source.Path, backup));
-                done = backup is null ? Loc.F("Clear_Done", source.DisplayName) : Loc.F("Clear_DoneWithCopy", source.DisplayName, backup);
-            }
-            catch (EventLogException ex)
-            {
-                // Windows refused before deleting anything.
-                problem = ex.IsAccessDenied ? Loc.F("Clear_NeedsAdmin", source.DisplayName) : Loc.F("Clear_Failed", ex.Message);
-                offerAdmin = ex.IsAccessDenied && !_isElevated;
-            }
-            catch (BackupNotSavedException ex)
-            {
-                // The log is empty and the message names where its copy is.
-                problem = ex.Message;
-            }
-            ReopenAfterClear(source);
-            if (problem is not null) ShowProblem(problem, offerAdmin);
-            else ShowInfo(done!);
+                try
+                {
+                    LogCleaner.Clear(log.Path, backups[i]);
+                    return null;
+                }
+                catch (Exception ex)
+                {
+                    return ex;
+                }
+            }).ToArray());
+            _clearRunning = false;
+            ReopenIfCleared(logs);
+            foreach (LogSource log in logs) RecountLog(log.Path);
+            ReportClear(request, logs, backups, backupFolder, failures);
         }
         catch (Exception ex)
         {
-            // This is an async void handler, so an exception that escaped here would end the app. Whether the log was
-            // emptied is unknown here, so the message does not claim either, and the log is read again to show it.
+            // This is an async void handler, so an exception that escaped here would end the app. Whether the logs were
+            // emptied is unknown here, so the message does not claim either, and the open log is read again to show it.
             CrashLog.Write(ex);
-            if (started) ReopenAfterClear(source);
-            ShowProblem(Loc.F("Clear_Unexpected", source.DisplayName, ex.Message), offerAdmin: false);
+            if (started)
+            {
+                ReopenIfCleared(logs);
+                foreach (LogSource log in logs) RecountLog(log.Path);
+            }
+            ShowProblem(Loc.F("Clear_Unexpected", request.Name, ex.Message), offerAdmin: false);
         }
         finally
         {
+            _clearRunning = false;
             _clearing = false;
             if (!_closed) ClearButton.IsEnabled = _source?.Kind == LogSourceKind.Channel;
         }
@@ -1314,10 +1557,96 @@ public sealed partial class MainWindow : Window
 
     private bool _clearing;
 
-    /// <summary>Reads the cleared log again, unless the user has opened another one meanwhile.</summary>
-    private void ReopenAfterClear(LogSource source)
+    /// <summary>What the user asked to clear: one log, or the logs of a folder in the log tree.</summary>
+    private sealed record ClearRequest(string Name, List<LogSource> Logs, bool IsFolder);
+
+    private static string Number(long value) => value.ToString("N0", CultureInfo.CurrentCulture);
+
+    private static string ClearQuestion(ClearRequest request, int logCount, long?[] counts)
     {
-        if (!_closed && _source == source) Open(source);
+        if (!request.IsFolder)
+            return counts[0] is long known ? Loc.F("Clear_Text", Number(known), request.Name) : Loc.F("Clear_TextNoCount", request.Name);
+        string text = Loc.F("Clear_FolderText", Number(counts.Sum(c => c ?? 0)), Number(logCount), request.Name);
+        int unknown = counts.Count(c => c is null);
+        return unknown == 0 ? text : text + " " + Loc.F("Clear_FolderUnknown", Number(unknown));
+    }
+
+    /// <summary>Tells the user which logs were cleared, where their copies are, and which could not be cleared and why.</summary>
+    private void ReportClear(ClearRequest request, List<LogSource> logs, string?[] backups, string? backupFolder, Exception?[] failures)
+    {
+        // A copy that stayed in the temporary folder is the only copy of a cleared log, so those messages come first.
+        var keptCopies = new List<string>();
+        var unexpected = new List<string>();
+        var refused = new List<string>();
+        bool offerAdmin = false;
+        for (int i = 0; i < logs.Count; i++)
+        {
+            switch (failures[i])
+            {
+                case null:
+                    break;
+                case BackupNotSavedException ex:
+                    keptCopies.Add(ex.Message);
+                    break;
+                case EventLogException ex:
+                    // Windows refused before deleting anything.
+                    refused.Add(ex.IsAccessDenied ? Loc.F("Clear_NeedsAdmin", logs[i].DisplayName)
+                        : request.IsFolder ? Loc.F("Clear_FailedLog", logs[i].DisplayName, ex.Message) : Loc.F("Clear_Failed", ex.Message));
+                    offerAdmin |= ex.IsAccessDenied && !_isElevated;
+                    break;
+                case Exception ex:
+                    // Whether this log was emptied is unknown, so the message does not claim either.
+                    CrashLog.Write(ex);
+                    unexpected.Add(request.IsFolder ? Loc.F("Clear_UnexpectedLog", logs[i].DisplayName, ex.Message) : Loc.F("Clear_Unexpected", request.Name, ex.Message));
+                    break;
+            }
+        }
+        List<string> problems = [.. keptCopies, .. unexpected, .. refused];
+        if (!request.IsFolder)
+        {
+            if (problems.Count > 0) ShowProblem(problems[0], offerAdmin);
+            else ShowInfo(backups[0] is { } backup ? Loc.F("Clear_DoneWithCopy", request.Name, backup) : Loc.F("Clear_Done", request.Name));
+            return;
+        }
+
+        int cleared = failures.Count(f => f is null or BackupNotSavedException);
+        var message = new StringBuilder(Loc.F("Clear_FolderDone", Number(cleared), Number(logs.Count), request.Name));
+        if (backupFolder is not null && cleared > keptCopies.Count) message.Append(' ').Append(Loc.F("Clear_FolderCopies", backupFolder));
+        const int ShownProblems = 5;
+        foreach (string problem in problems.Take(ShownProblems)) message.Append('\n').Append(problem);
+        if (problems.Count > ShownProblems) message.Append('\n').Append(Loc.F("Clear_FolderMore", Number(problems.Count - ShownProblems)));
+        if (problems.Count > 0) ShowProblem(message.ToString(), offerAdmin);
+        else ShowInfo(message.ToString());
+    }
+
+    private async Task<string> PickFolder()
+    {
+        PickFolderResult? result = await new FolderPicker(AppWindow.Id).PickSingleFolderAsync();
+        return result?.Path ?? "";
+    }
+
+    /// <summary>One file per log in the chosen folder, named after the log and the date, and never one that already exists.</summary>
+    private static string?[] BackupPaths(string folder, List<LogSource> logs)
+    {
+        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        return logs.Select(string? (log) =>
+        {
+            string baseName = $"{SafeFileName(log.DisplayName)}-{DateTime.Now:yyyy-MM-dd}";
+            string path = Path.Combine(folder, baseName + ".evtx");
+            for (int n = 2; File.Exists(path) || !used.Add(path); n++) path = Path.Combine(folder, $"{baseName} ({n}).evtx");
+            return path;
+        }).ToArray();
+    }
+
+    /// <summary>
+    /// Reads the open log again if it is one of the cleared logs, whether it was open before the clear or was opened
+    /// while the clear ran, so the list never keeps showing events that were deleted.
+    /// </summary>
+    private void ReopenIfCleared(List<LogSource> logs)
+    {
+        if (!_closed && _source is { Kind: LogSourceKind.Channel } open
+            && logs.Any(log => string.Equals(log.Path, open.Path, StringComparison.OrdinalIgnoreCase)))
+            Open(open);
     }
     /// <summary>Runs a save off the UI thread and shows the message it returns, or why it failed.</summary>
     private async Task RunSave(Func<string> save)
@@ -1353,7 +1682,7 @@ public sealed partial class MainWindow : Window
     private void Admin_Click(object sender, RoutedEventArgs e)
     {
         string? executable = Environment.ProcessPath;
-        if (executable is null) return;
+        if (executable is null || RefuseWhileClearing()) return;
         var start = new ProcessStartInfo(executable) { UseShellExecute = true, Verb = "runas" };
         foreach (string argument in StartupArguments.For(_source)) start.ArgumentList.Add(argument);
         try

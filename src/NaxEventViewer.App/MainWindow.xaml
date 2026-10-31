@@ -104,7 +104,7 @@
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
-                <TreeView x:Name="LogTree" SelectionMode="Single" ItemInvoked="LogTree_ItemInvoked" Padding="0,6,0,0">
+                <TreeView x:Name="LogTree" SelectionMode="Single" ItemInvoked="LogTree_ItemInvoked" ContextRequested="LogTree_ContextRequested" Padding="0,6,0,0">
                     <TreeView.ItemTemplate>
                         <DataTemplate x:DataType="local:LogNode">
                             <TreeViewItem ItemsSource="{x:Bind Children}" IsExpanded="{x:Bind IsExpanded, Mode=TwoWay}" AutomationProperties.Name="{x:Bind Name}">
@@ -195,7 +195,7 @@
                 </Grid>
 
                 <ListView x:Name="EventList" Grid.Row="2" SelectionMode="Extended" SelectionChanged="EventList_SelectionChanged"
-                          KeyDown="EventList_KeyDown" Padding="4,0,4,0">
+                          KeyDown="EventList_KeyDown" ContextRequested="EventList_ContextRequested" Padding="4,0,4,0">
                     <ListView.ItemContainerStyle>
                         <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
                             <Setter Property="MinHeight" Value="30" />

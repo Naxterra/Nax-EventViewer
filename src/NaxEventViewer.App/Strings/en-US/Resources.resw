@@ -118,4 +118,33 @@
   <data name="Clear_Failed" xml:space="preserve"><value>The log could not be cleared, so nothing was deleted. {0}</value></data>
   <data name="Clear_StillReading" xml:space="preserve"><value>The log is still being read. Clear it once every event has been read.</value></data>
   <data name="Clear_Unexpected" xml:space="preserve"><value>Clearing {0} stopped with an unexpected error. Check the list to see whether the log was emptied. {1}</value></data>
+  <data name="Clear_TextNoCount" xml:space="preserve"><value>All events in {0} will be deleted for good. "Save and clear" saves them to a .evtx file first. Windows keeps writing new events into the log afterwards.</value></data>
+  <data name="Menu_Open" xml:space="preserve"><value>Open</value></data>
+  <data name="Menu_SaveEvtx" xml:space="preserve"><value>Save as .evtx…</value></data>
+  <data name="Menu_ClearLog" xml:space="preserve"><value>Clear log…</value></data>
+  <data name="Menu_CopyLogName" xml:space="preserve"><value>Copy log name</value></data>
+  <data name="Menu_CopyPath" xml:space="preserve"><value>Copy path</value></data>
+  <data name="Menu_ShowInFolder" xml:space="preserve"><value>Show in folder</value></data>
+  <data name="Menu_CopyEvent" xml:space="preserve"><value>Copy event</value></data>
+  <data name="Menu_CopyEvents" xml:space="preserve"><value>Copy events</value></data>
+  <data name="Menu_CopyKey" xml:space="preserve"><value>Ctrl+C</value></data>
+  <data name="Menu_CopyDetails" xml:space="preserve"><value>Copy details</value></data>
+  <data name="Menu_OnlyEventId" xml:space="preserve"><value>Show only event ID {0}</value></data>
+  <data name="Menu_HideEventId" xml:space="preserve"><value>Hide event ID {0}</value></data>
+  <data name="Menu_ResetFilters" xml:space="preserve"><value>Reset filters</value></data>
+  <data name="Menu_Expand" xml:space="preserve"><value>Expand</value></data>
+  <data name="Menu_Collapse" xml:space="preserve"><value>Collapse</value></data>
+  <data name="Menu_ExpandAll" xml:space="preserve"><value>Expand all</value></data>
+  <data name="Menu_CollapseAll" xml:space="preserve"><value>Collapse all</value></data>
+  <data name="Menu_ClearFolder" xml:space="preserve"><value>Clear logs…</value></data>
+  <data name="Clear_FolderTitle" xml:space="preserve"><value>Clear {0} logs in {1}?</value></data>
+  <data name="Clear_FolderText" xml:space="preserve"><value>All {0} events in {1} logs in {2} will be deleted for good. "Save and clear" first saves each log to its own .evtx file in a folder you choose. Windows keeps writing new events into these logs afterwards.</value></data>
+  <data name="Clear_FolderUnknown" xml:space="preserve"><value>{0} of these logs could not be counted, so their events are not included.</value></data>
+  <data name="Clear_FolderEmpty" xml:space="preserve"><value>All logs in {0} are already empty.</value></data>
+  <data name="Clear_FolderDone" xml:space="preserve"><value>{0} of {1} logs in {2} were cleared.</value></data>
+  <data name="Clear_FolderCopies" xml:space="preserve"><value>Their events were saved in {0}.</value></data>
+  <data name="Clear_FolderMore" xml:space="preserve"><value>{0} more logs had a problem as well.</value></data>
+  <data name="Clear_FailedLog" xml:space="preserve"><value>{0} could not be cleared, so nothing was deleted from it. {1}</value></data>
+  <data name="Clear_UnexpectedLog" xml:space="preserve"><value>Clearing {0} stopped with an unexpected error. Check whether this log was emptied. {1}</value></data>
+  <data name="Clear_WaitBeforeClosing" xml:space="preserve"><value>Logs are still being cleared. Close the window once clearing has finished.</value></data>
 </root>

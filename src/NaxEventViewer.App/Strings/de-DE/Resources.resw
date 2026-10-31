@@ -118,4 +118,33 @@
   <data name="Clear_Failed" xml:space="preserve"><value>Das Protokoll konnte nicht geleert werden, daher wurde nichts gelöscht. {0}</value></data>
   <data name="Clear_StillReading" xml:space="preserve"><value>Das Protokoll wird noch gelesen. Leeren Sie es, sobald alle Ereignisse gelesen sind.</value></data>
   <data name="Clear_Unexpected" xml:space="preserve"><value>Das Leeren von {0} wurde durch einen unerwarteten Fehler abgebrochen. Prüfen Sie in der Liste, ob das Protokoll geleert wurde. {1}</value></data>
+  <data name="Clear_TextNoCount" xml:space="preserve"><value>Alle Ereignisse in {0} werden endgültig gelöscht. „Speichern und leeren“ sichert sie vorher in einer .evtx-Datei. Windows schreibt danach weiter neue Ereignisse in das Protokoll.</value></data>
+  <data name="Menu_Open" xml:space="preserve"><value>Öffnen</value></data>
+  <data name="Menu_SaveEvtx" xml:space="preserve"><value>Als .evtx speichern…</value></data>
+  <data name="Menu_ClearLog" xml:space="preserve"><value>Protokoll leeren…</value></data>
+  <data name="Menu_CopyLogName" xml:space="preserve"><value>Protokollnamen kopieren</value></data>
+  <data name="Menu_CopyPath" xml:space="preserve"><value>Pfad kopieren</value></data>
+  <data name="Menu_ShowInFolder" xml:space="preserve"><value>Im Ordner anzeigen</value></data>
+  <data name="Menu_CopyEvent" xml:space="preserve"><value>Ereignis kopieren</value></data>
+  <data name="Menu_CopyEvents" xml:space="preserve"><value>Ereignisse kopieren</value></data>
+  <data name="Menu_CopyKey" xml:space="preserve"><value>Strg+C</value></data>
+  <data name="Menu_CopyDetails" xml:space="preserve"><value>Details kopieren</value></data>
+  <data name="Menu_OnlyEventId" xml:space="preserve"><value>Nur Ereignis-ID {0} anzeigen</value></data>
+  <data name="Menu_HideEventId" xml:space="preserve"><value>Ereignis-ID {0} ausblenden</value></data>
+  <data name="Menu_ResetFilters" xml:space="preserve"><value>Filter zurücksetzen</value></data>
+  <data name="Menu_Expand" xml:space="preserve"><value>Erweitern</value></data>
+  <data name="Menu_Collapse" xml:space="preserve"><value>Reduzieren</value></data>
+  <data name="Menu_ExpandAll" xml:space="preserve"><value>Alle erweitern</value></data>
+  <data name="Menu_CollapseAll" xml:space="preserve"><value>Alle reduzieren</value></data>
+  <data name="Menu_ClearFolder" xml:space="preserve"><value>Protokolle leeren…</value></data>
+  <data name="Clear_FolderTitle" xml:space="preserve"><value>{0} Protokolle in {1} leeren?</value></data>
+  <data name="Clear_FolderText" xml:space="preserve"><value>Alle {0} Ereignisse in {1} Protokollen in {2} werden endgültig gelöscht. „Speichern und leeren“ sichert vorher jedes Protokoll in einer eigenen .evtx-Datei in einem Ordner Ihrer Wahl. Windows schreibt danach weiter neue Ereignisse in diese Protokolle.</value></data>
+  <data name="Clear_FolderUnknown" xml:space="preserve"><value>{0} dieser Protokolle konnten nicht gezählt werden, daher sind ihre Ereignisse nicht enthalten.</value></data>
+  <data name="Clear_FolderEmpty" xml:space="preserve"><value>Alle Protokolle in {0} sind bereits leer.</value></data>
+  <data name="Clear_FolderDone" xml:space="preserve"><value>{0} von {1} Protokollen in {2} wurden geleert.</value></data>
+  <data name="Clear_FolderCopies" xml:space="preserve"><value>Ihre Ereignisse wurden in {0} gespeichert.</value></data>
+  <data name="Clear_FolderMore" xml:space="preserve"><value>Bei {0} weiteren Protokollen gab es ebenfalls ein Problem.</value></data>
+  <data name="Clear_FailedLog" xml:space="preserve"><value>{0} konnte nicht geleert werden, daher wurde daraus nichts gelöscht. {1}</value></data>
+  <data name="Clear_UnexpectedLog" xml:space="preserve"><value>Das Leeren von {0} wurde durch einen unerwarteten Fehler abgebrochen. Prüfen Sie, ob dieses Protokoll geleert wurde. {1}</value></data>
+  <data name="Clear_WaitBeforeClosing" xml:space="preserve"><value>Es werden noch Protokolle geleert. Schließen Sie das Fenster, sobald das Leeren abgeschlossen ist.</value></data>
 </root>
