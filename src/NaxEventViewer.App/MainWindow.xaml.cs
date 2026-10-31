@@ -112,7 +112,23 @@ public sealed partial class MainWindow : Window
         BuildTree();
         LoadChannelInfoInBackground();
         OpenStartupTarget(Program.Startup);
-        Closed += (_, _) => StopLoading();
+        Closed += (_, _) => OnClosed();
+    }
+
+    /// <summary>
+    /// Set once the window is closed. Work that finishes afterwards, such as a list rebuild, a timer tick or a batch
+    /// from the background reader, must not touch the controls any more: XAML is shutting down, and changing a control
+    /// then ends the process with an error.
+    /// </summary>
+    private bool _closed;
+
+    private void OnClosed()
+    {
+        _closed = true;
+        _tick.Stop();
+        _filterDelay.Stop();
+        _clockTimer.Stop();
+        StopLoading();
     }
 
     /// <summary>Fills in the fixed labels of the window in the interface language.</summary>
@@ -223,6 +239,7 @@ public sealed partial class MainWindow : Window
                 using Process helper = Process.Start(start)!;
                 await helper.WaitForExitAsync();
                 exitCode = helper.ExitCode;
+                if (_closed) return;
             }
             catch (System.ComponentModel.Win32Exception)
             {
@@ -266,6 +283,7 @@ public sealed partial class MainWindow : Window
         {
             DispatcherQueue.TryEnqueue(() =>
             {
+                if (_closed) return;
                 if (task.IsFaulted)
                 {
                     _servicesFolder.Children.Clear();
@@ -382,7 +400,7 @@ public sealed partial class MainWindow : Window
             // Counting opens the file, which can take a while on a slow network share, so it runs off the UI thread.
             Task.Run(() => ChannelCatalog.CountRecords(source.Path, isFile: true)).ContinueWith(task =>
             {
-                if (task.IsCompletedSuccessfully) DispatcherQueue.TryEnqueue(() => node.CountText = LogNode.FormatCount(task.Result));
+                if (task.IsCompletedSuccessfully) DispatcherQueue.TryEnqueue(() => { if (!_closed) node.CountText = LogNode.FormatCount(task.Result); });
             });
         }
         Open(source);
@@ -422,7 +440,7 @@ public sealed partial class MainWindow : Window
         DispatcherQueue queue = DispatcherQueue;
         void Post(Action action) => queue.TryEnqueue(() =>
         {
-            if (!token.IsCancellationRequested) action();
+            if (!token.IsCancellationRequested && !_closed) action();
         });
 
         _messages = new MessageStore();
@@ -501,6 +519,7 @@ public sealed partial class MainWindow : Window
 
     private void OnTick()
     {
+        if (_closed) return;
         FlushLiveEvents();
         bool loading = _recordsLoading || _messagesLoading;
         // While loading, a rebuild at most once a second keeps the list current without making it jumpy.
@@ -528,12 +547,12 @@ public sealed partial class MainWindow : Window
                 {
                     pending.Enqueue(item);
                     if (Interlocked.Exchange(ref _liveWakeQueued, 1) == 0)
-                        queue.TryEnqueue(() => _tick.Start());
+                        queue.TryEnqueue(() => { if (!_closed) _tick.Start(); });
                 },
                 message => queue.TryEnqueue(() =>
                 {
                     // The notice may arrive after the user switched Live off and on again; it must not stop the new subscription.
-                    if (!token.IsCancellationRequested && subscription is not null && _live == subscription) OnLiveFailed(message);
+                    if (!token.IsCancellationRequested && !_closed && subscription is not null && _live == subscription) OnLiveFailed(message);
                 }));
             _live = subscription;
             // Without a bookmark, only events written from now on arrive, so say that a few may be missing.
@@ -602,6 +621,7 @@ public sealed partial class MainWindow : Window
         try
         {
             inLog = await Task.Run(() => ChannelCatalog.CountRecords(source.Path));
+            if (_closed) return;
         }
         catch (Exception ex)
         {
@@ -693,6 +713,7 @@ public sealed partial class MainWindow : Window
     private void ApplyFilter()
     {
         _filterDelay.Stop();
+        if (_closed) return;
         bool idsValid = EventIdFilter.TryParse(EventIdBox.Text, out EventIdFilter? ids);
         // An invalid list shows nothing rather than everything, so a typo is never mistaken for a working filter.
         _idsInvalid = !idsValid;
@@ -773,6 +794,7 @@ public sealed partial class MainWindow : Window
         try
         {
             (List<EventItem> shown, int[] counts) = await Task.Run(() => EventView.FilterAndSort(snapshot, filter, comparer));
+            if (_closed) return;
             // Apply only if nothing changed meanwhile; otherwise the newer request below recomputes.
             if (version == _loadVersion && filter == _filter && comparer == _comparer)
                 ApplyRebuild(shown, counts, snapshot.Length, keepScroll);
@@ -962,7 +984,7 @@ public sealed partial class MainWindow : Window
             XmlText.Text = CoreText.F("Error_ReadAgain", ex.Message);
             return;
         }
-        if (version != _detailVersion) return;
+        if (version != _detailVersion || _closed) return;
 
         _detail = detail;
         if (!item.HasMessage && detail.Message is not null)
@@ -1075,7 +1097,7 @@ public sealed partial class MainWindow : Window
                 }
                 return builder.ToString();
             });
-            if (text.Length > 0) CopyText(text);
+            if (text.Length > 0 && !_closed) CopyText(text);
         }
         catch (Exception ex)
         {
@@ -1215,6 +1237,7 @@ public sealed partial class MainWindow : Window
         try
         {
             string message = await Task.Run(save);
+            if (_closed) return;
             ProblemBar.Severity = InfoBarSeverity.Success;
             ProblemBar.Message = message;
             ProblemAdminButton.Visibility = Visibility.Collapsed;

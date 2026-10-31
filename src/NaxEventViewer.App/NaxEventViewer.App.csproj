@@ -8,7 +8,7 @@
     <AssemblyName>Nax-EventViewer</AssemblyName>
     <Product>Nax-EventViewer</Product>
     <Company>Naxterra</Company>
-    <Version>0.2.0</Version>
+    <Version>0.2.1</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\Nax-EventViewer.ico</ApplicationIcon>
     <Platforms>x64;ARM64</Platforms>
@@ -27,7 +27,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <PublishReadyToRun>false</PublishReadyToRun>
+    <!-- Compiled ahead of time, so a start does not wait for .NET to compile the app's and the runtime's code first. -->
+    <PublishReadyToRun>true</PublishReadyToRun>
     <PublishTrimmed>false</PublishTrimmed>
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
   </PropertyGroup>
@@ -37,7 +38,12 @@
     <Content Include="Assets\Nax-EventViewer.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <ProjectReference Include="..\NaxEventViewer.Core\NaxEventViewer.Core.csproj" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2270" />
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.2.0" />
+    <!-- Only the parts of the Windows App SDK the app uses. The whole SDK would also bring its AI and machine-learning
+         components, about 40 MB that every start and every virus scan has to get past. -->
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.2.1" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.Foundation" Version="2.1.0" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="2.0.15" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" Version="2.2.0" />
   </ItemGroup>
 
   <Target Name="CopyGeneratedXamlToPublish" AfterTargets="Publish">

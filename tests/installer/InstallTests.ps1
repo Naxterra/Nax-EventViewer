@@ -98,7 +98,7 @@ try {
     if (-not ((Test-Path $license) -and ((Get-Content $license -TotalCount 1) -match '^Nax Source-Available License'))) { $problems += 'the license text is missing' }
     $noticesFile = Join-Path $installDir 'THIRD-PARTY-NOTICES.txt'
     $noticesText = if (Test-Path $noticesFile) { Get-Content $noticesFile -Raw } else { '' }
-    foreach ($component in 'Microsoft.NETCore.App.Runtime.win-x64', 'Microsoft.WindowsAppSDK', 'Microsoft.Windows.SDK.NET.Ref') {
+    foreach ($component in 'Microsoft.NETCore.App.Runtime.win-x64', 'Microsoft.WindowsAppSDK.WinUI', 'Microsoft.WindowsAppSDK.Runtime', 'Microsoft.Windows.SDK.NET.Ref') {
         if ($noticesText -notmatch "(?m)^$([regex]::Escape($component)) ") { $problems += "the third-party notices do not list $component" }
     }
     # The full license texts are in the file, not only the names.
@@ -127,6 +127,18 @@ try {
     }
     Report 'installed_app_carries_its_own_dotnet_starts_and_creates_its_running_mutex' `
         'The installed program folder contains the .NET runtime, the app does not ask for a .NET installed on the PC, it starts and shows its window, and another normal process can open its running mutex. An app started as administrator is not covered.' $problems
+
+    # Closing the window while messages are still loading once ended the process with an error.
+    $problems = @()
+    foreach ($attempt in 1..5) {
+        $closing = Start-InstalledApp
+        Start-Sleep -Milliseconds (300 * $attempt)
+        $closing.CloseMainWindow() | Out-Null
+        if (-not $closing.WaitForExit(10000)) { Stop-Process -Id $closing.Id -Force; $problems += "attempt ${attempt}: the app did not close" }
+        elseif ($closing.ExitCode -ne 0) { $problems += "attempt ${attempt}: the app ended with error code 0x$('{0:X8}' -f $closing.ExitCode)" }
+    }
+    Report 'closing_the_app_while_it_loads_ends_it_cleanly' `
+        'Closing the window five times at different moments while the Application log and its messages are still loading ends the app without an error every time.' $problems
 
     # Uninstalling while the app runs must either refuse and leave the installation whole, or remove all of it.
     $problems = @()
