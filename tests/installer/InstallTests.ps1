@@ -95,7 +95,7 @@ try {
     $license = Join-Path $installDir 'LICENSE.txt'
     if (-not ((Test-Path $license) -and ((Get-Content $license -TotalCount 1) -match '^Nax Source-Available License'))) { $problems += 'the license text is missing' }
     if (-not (Test-Path (Join-Path $installDir 'THIRD-PARTY-NOTICES.txt'))) { $problems += 'the third-party notices are missing' }
-    foreach ($notice in 'licenses\Microsoft.NETCore.App.Runtime.win-x64\LICENSE.TXT', 'licenses\Microsoft.NETCore.App.Runtime.win-x64\THIRD-PARTY-NOTICES.TXT', 'licenses\Microsoft.WindowsAppSDK\license.txt') {
+    foreach ($notice in 'licenses\Microsoft.NETCore.App.Runtime.win-x64\LICENSE.TXT', 'licenses\Microsoft.NETCore.App.Runtime.win-x64\THIRD-PARTY-NOTICES.TXT', 'licenses\Microsoft.WindowsAppSDK\license.txt', 'licenses\Microsoft.Windows.SDK.NET.Ref\LICENSE-NOTICE.txt') {
         if (-not (Test-Path (Join-Path $installDir $notice))) { $problems += "the bundled component notice $notice is missing" }
     }
     if (-not (Test-Path $uninstallKey)) { $problems += 'there is no entry in Installed apps' }

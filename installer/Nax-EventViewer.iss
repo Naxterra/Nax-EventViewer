@@ -67,6 +67,10 @@ Root: HKA; Subkey: "Software\Classes\{#ProgId}"; ValueType: string; ValueName: "
 Root: HKA; Subkey: "Software\Classes\{#ProgId}\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExe},0"; Tasks: openwith
 Root: HKA; Subkey: "Software\Classes\{#ProgId}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; Tasks: openwith
 
+[InstallDelete]
+; The notices of components an earlier version bundled and this one no longer does must not stay behind.
+Type: filesandordirs; Name: "{app}\licenses"
+
 [UninstallDelete]
 ; Copies of a whole log that a save interrupted by a crash left in the temporary folder of the user who uninstalls.
 Type: files; Name: "{%TEMP}\nax-eventviewer-export-*.evtx"

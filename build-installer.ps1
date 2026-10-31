@@ -35,9 +35,10 @@ if (-not (Test-Path (Join-Path $publishDir 'coreclr.dll'))) { throw "The publish
 # The bundled .NET runtime, Windows App SDK and WebView2 parts stay under their own licenses, which require their
 # notices to travel with every copy. Their license and notice files are copied from the packages the build used.
 Write-Host "Collecting third-party notices"
-$packages = if ($env:NUGET_PACKAGES) { $env:NUGET_PACKAGES } else { Join-Path $env:USERPROFILE '.nuget\packages' }
 $deps = Get-Content (Join-Path $publishDir 'Nax-EventViewer.deps.json') -Raw | ConvertFrom-Json
 $assets = Get-Content (Join-Path $root 'src\NaxEventViewer.App\obj\project.assets.json') -Raw | ConvertFrom-Json
+# The folder the restore actually used, which a NuGet.Config can move away from the default.
+$packages = $assets.packageFolders.PSObject.Properties.Name | Select-Object -First 1
 $components = @(
     $deps.libraries.PSObject.Properties | Where-Object { $_.Value.type -in 'package', 'runtimepack' } | ForEach-Object { $_.Name -replace '^runtimepack\.', '' }
     $assets.libraries.PSObject.Properties | Where-Object { $_.Value.type -eq 'package' } | ForEach-Object { $_.Name }
@@ -48,20 +49,34 @@ New-Item -ItemType Directory -Force $licenseDir | Out-Null
 $overview = [System.Collections.Generic.List[string]]::new()
 $overview.Add('Third-party components in Nax Event Viewer')
 $overview.Add('')
-$overview.Add('Nax Event Viewer includes the following components from other authors. They are not covered by the Nax Source-Available License; each stays under its own license, whose text and notices are in the folder named after the component inside the "licenses" folder next to this file.')
+$overview.Add('Nax Event Viewer includes the following components from other authors. They are not covered by the Nax Source-Available License; each stays under its own license. The folder named after each component inside the "licenses" folder next to this file holds the license texts and notices its package contains. For a package that contains no license text, that folder holds its copyright notice and the address of its license instead.')
 $overview.Add('')
 foreach ($component in $components) {
     $id, $componentVersion = $component.Split('/')
     $folder = Join-Path $packages "$($id.ToLowerInvariant())\$($componentVersion.ToLowerInvariant())"
     if (-not (Test-Path $folder)) { throw "The package folder of $component was not found at $folder." }
     $files = Get-ChildItem $folder -File | Where-Object { $_.Name -match '^(license|notice|third-?party-?notices)' }
+    $target = New-Item -ItemType Directory -Force (Join-Path $licenseDir $id)
     if ($files) {
-        $target = New-Item -ItemType Directory -Force (Join-Path $licenseDir $id)
         foreach ($file in $files) { Copy-Item $file.FullName (Join-Path $target $file.Name) }
         $overview.Add("- $id ${componentVersion}: licenses\$id ($(($files.Name) -join ', '))")
     }
     else {
-        $overview.Add("- $id ${componentVersion}: the package contains no license file; its license is named on https://www.nuget.org/packages/$id/$componentVersion")
+        # The package's own description names its copyright and its license, by expression or by address.
+        $nuspec = [xml](Get-Content (Get-ChildItem $folder -Filter *.nuspec | Select-Object -First 1).FullName)
+        $metadata = $nuspec.package.metadata
+        $licenseText = if ($metadata.license) { "License: $($metadata.license.'#text') (https://spdx.org/licenses/$($metadata.license.'#text').html)" }
+            elseif ($metadata.licenseUrl) { "License: $($metadata.licenseUrl)" }
+            else { throw "The package $component names no license." }
+        Set-Content (Join-Path $target 'LICENSE-NOTICE.txt') @(
+            "$id $componentVersion"
+            ''
+            $metadata.copyright
+            ''
+            'This package contains no license text of its own.'
+            $licenseText
+        ) -Encoding utf8
+        $overview.Add("- $id ${componentVersion}: licenses\$id (LICENSE-NOTICE.txt)")
     }
 }
 Set-Content (Join-Path $publishDir 'THIRD-PARTY-NOTICES.txt') $overview -Encoding utf8
