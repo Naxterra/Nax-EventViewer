@@ -74,8 +74,9 @@ Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
+; The same taskbar ID the app sets for itself, so a pinned shortcut and the running app share one taskbar button.
+Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: "Naxterra.NaxEventViewer"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; AppUserModelID: "Naxterra.NaxEventViewer"; Tasks: desktopicon
 
 [Registry]
 ; Only an "Open with" entry. The default program for .evtx files is not changed. The two .evtx keys are removed on

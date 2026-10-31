@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Security.Principal;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
@@ -5,8 +6,11 @@ using NaxEventViewer.Core;
 
 namespace NaxEventViewer.App;
 
-public static class Program
+public static partial class Program
 {
+    /// <summary>The app's identity on the taskbar. The installer's shortcuts carry the same value.</summary>
+    internal const string AppUserModelId = "Naxterra.NaxEventViewer";
+
     internal const string ReplaceOnArgument = "--replace-eventviewer-on";
     internal const string ReplaceOffArgument = "--replace-eventviewer-off";
 
@@ -28,6 +32,10 @@ public static class Program
         if (args.Length >= 1 && args[0] is ReplaceOnArgument or ReplaceOffArgument) return RunReplaceHelper(args);
 
         RunningMutex.Hold();
+        // Started in place of eventvwr.exe from the Win+X menu, Windows would otherwise show the app on the taskbar as the
+        // Windows Event Viewer shortcut it was started from, with that shortcut's icon. The installer gives its own
+        // shortcuts the same ID, so a pinned shortcut and the running app share one taskbar button.
+        SetCurrentProcessExplicitAppUserModelID(AppUserModelId);
         Settings = AppSettings.Load();
         Startup = StartupArguments.Parse(args);
         WinRT.ComWrappersSupport.InitializeComWrappers();
@@ -65,4 +73,8 @@ public static class Program
             return HelperFailed;
         }
     }
+
+    // A failure only leaves the taskbar icon as Windows chose it, so the result is not checked.
+    [LibraryImport("shell32.dll", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial int SetCurrentProcessExplicitAppUserModelID(string appId);
 }
