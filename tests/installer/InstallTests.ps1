@@ -29,6 +29,8 @@ $desktopShortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Nax Even
 $crashFolder = Join-Path $env:LOCALAPPDATA 'Nax-EventViewer'
 
 if (Test-Path $uninstallKey) { throw 'Nax Event Viewer is installed for this user. Uninstall it before running this test.' }
+# Setup waits for every open window of the app to close, so with one open the silent installation below would refuse.
+if (Get-Process Nax-EventViewer -ErrorAction SilentlyContinue) { throw 'Nax Event Viewer is open. Close every window of it before running this test.' }
 if (Test-Path $desktopShortcut) { throw "A desktop shortcut named Nax Event Viewer already exists: $desktopShortcut" }
 $evtxKeyExistedBefore = Test-Path $evtxKey
 

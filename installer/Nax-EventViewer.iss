@@ -60,8 +60,8 @@ english.EvtxFileType=Event log file
 german.EvtxFileType=Ereignisprotokolldatei
 english.CrashLogQuestion={#AppName} kept a crash log in %1.%n%nDo you want to delete it as well?
 german.CrashLogQuestion={#AppName} hat ein Absturzprotokoll in %1 gespeichert.%n%nMöchten Sie es ebenfalls löschen?
-english.RestoreNeedsAdmin={#AppName} replaces the Windows Event Viewer, and only an uninstall with administrator rights can restore it. Turn the replacement off in the app's settings first, or uninstall it from Installed apps, which asks for administrator rights.
-german.RestoreNeedsAdmin={#AppName} ersetzt die Windows-Ereignisanzeige, und nur eine Deinstallation mit Administratorrechten kann sie wiederherstellen. Schalten Sie das Ersetzen zuerst in den Einstellungen der App aus oder deinstallieren Sie sie über „Installierte Apps“, wo nach Administratorrechten gefragt wird.
+english.RestoreNeedsAdmin={#AppName} replaces the Windows Event Viewer, and this uninstall cannot restore it, because it lacks administrator rights or the setting is protected. Turn off "Replace Windows Event Viewer" in the app's settings first, then uninstall again.
+german.RestoreNeedsAdmin={#AppName} ersetzt die Windows-Ereignisanzeige, und diese Deinstallation kann sie nicht wiederherstellen, weil ihr Administratorrechte fehlen oder die Einstellung geschützt ist. Schalten Sie zuerst „Windows-Ereignisanzeige ersetzen“ in den Einstellungen der App aus und deinstallieren Sie dann erneut.
 english.RestoreFailed=The Windows Event Viewer could not be restored, so Windows still tries to start {#AppName} in its place. Delete the value "Debugger" under HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\eventvwr.exe to restore it.
 german.RestoreFailed=Die Windows-Ereignisanzeige konnte nicht wiederhergestellt werden, daher versucht Windows weiterhin, {#AppName} an ihrer Stelle zu starten. Löschen Sie den Wert „Debugger“ unter HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\eventvwr.exe, um sie wiederherzustellen.
 
@@ -121,13 +121,16 @@ end;
 // It only refuses to start when this installation replaces the Windows Event Viewer and the uninstaller lacks the
 // administrator rights to restore it, so the uninstall never leaves eventvwr.exe pointing at a deleted program.
 function InitializeUninstall: Boolean;
+var
+  Value: String;
 begin
   Result := True;
-  if ReplacementIsOurs and not IsAdmin then
-  begin
-    if not UninstallSilent then MsgBox(CustomMessage('RestoreNeedsAdmin'), mbError, MB_OK);
-    Result := False;
-  end;
+  if not ReplacementIsOurs then Exit;
+  // Writing the same value again changes nothing but shows whether the restore will be allowed, while cancelling is
+  // still possible. It fails without administrator rights and when security software protects the key.
+  Result := IsAdmin and RegQueryStringValue(HKLM64, ReplacementKey, 'Debugger', Value) and
+    RegWriteStringValue(HKLM64, ReplacementKey, 'Debugger', Value);
+  if not Result and not UninstallSilent then MsgBox(CustomMessage('RestoreNeedsAdmin'), mbError, MB_OK);
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

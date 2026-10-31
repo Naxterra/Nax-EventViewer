@@ -6,6 +6,7 @@ Publishes Nax Event Viewer as a self-contained x64 app and builds the installer 
 The installer is written to artifacts\installer. The version comes from the app project unless -Version is given.
 Inno Setup 7 is expected at its standard per-user location, or at the path given with -IsccPath.
 #>
+#Requires -Version 7
 param(
     [string]$Version,
     [string]$IsccPath = (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 7\ISCC.exe')
@@ -55,7 +56,7 @@ foreach ($component in $components) {
     $id, $componentVersion = $component.Split('/')
     $folder = Join-Path $packages "$($id.ToLowerInvariant())\$($componentVersion.ToLowerInvariant())"
     if (-not (Test-Path $folder)) { throw "The package folder of $component was not found at $folder." }
-    $metadata = ([xml](Get-Content (Get-ChildItem $folder -Filter *.nuspec | Select-Object -First 1).FullName)).package.metadata
+    $metadata = ([xml](Get-Content -Encoding utf8 (Get-ChildItem $folder -Filter *.nuspec | Select-Object -First 1).FullName)).package.metadata
     $notices.Add('')
     $notices.Add($rule)
     $notices.Add("$id $componentVersion")
@@ -67,7 +68,7 @@ foreach ($component in $components) {
             $notices.Add('')
             $notices.Add("--- $($file.Name) ---")
             $notices.Add('')
-            $notices.Add(((Get-Content $file.FullName -Raw) -replace "`r`n", "`n").TrimEnd())
+            $notices.Add(((Get-Content $file.FullName -Raw -Encoding utf8) -replace "`r`n", "`n").TrimEnd())
         }
     }
     else {
