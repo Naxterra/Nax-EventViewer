@@ -60,8 +60,10 @@ english.EvtxFileType=Event log file
 german.EvtxFileType=Ereignisprotokolldatei
 english.CrashLogQuestion={#AppName} kept a crash log in %1.%n%nDo you want to delete it as well?
 german.CrashLogQuestion={#AppName} hat ein Absturzprotokoll in %1 gespeichert.%n%nMöchten Sie es ebenfalls löschen?
-english.RestoreFailed=The Windows Event Viewer could not be restored, so Windows still starts {#AppName} in its place. If you uninstall now, the Win+X entry for the Event Viewer will not open anything until the setting is removed.%n%nUninstall anyway?
-german.RestoreFailed=Die Windows-Ereignisanzeige konnte nicht wiederhergestellt werden, daher startet Windows weiterhin {#AppName} an ihrer Stelle. Wenn Sie jetzt deinstallieren, öffnet der Eintrag für die Ereignisanzeige im Win+X-Menü nichts mehr, bis die Einstellung entfernt ist.%n%nTrotzdem deinstallieren?
+english.RestoreNeedsAdmin={#AppName} replaces the Windows Event Viewer, and only an uninstall with administrator rights can restore it. Turn the replacement off in the app's settings first, or uninstall it from Installed apps, which asks for administrator rights.
+german.RestoreNeedsAdmin={#AppName} ersetzt die Windows-Ereignisanzeige, und nur eine Deinstallation mit Administratorrechten kann sie wiederherstellen. Schalten Sie das Ersetzen zuerst in den Einstellungen der App aus oder deinstallieren Sie sie über „Installierte Apps“, wo nach Administratorrechten gefragt wird.
+english.RestoreFailed=The Windows Event Viewer could not be restored, so Windows still tries to start {#AppName} in its place. Delete the value "Debugger" under HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\eventvwr.exe to restore it.
+german.RestoreFailed=Die Windows-Ereignisanzeige konnte nicht wiederhergestellt werden, daher versucht Windows weiterhin, {#AppName} an ihrer Stelle zu starten. Löschen Sie den Wert „Debugger“ unter HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\eventvwr.exe, um sie wiederherzustellen.
 
 [Tasks]
 Name: "openwith"; Description: "{cm:OpenWithTask}"
@@ -86,7 +88,7 @@ Root: HKA; Subkey: "Software\Classes\{#ProgId}\DefaultIcon"; ValueType: string; 
 Root: HKA; Subkey: "Software\Classes\{#ProgId}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; Tasks: openwith
 
 [InstallDelete]
-; The notices of components an earlier version bundled and this one no longer does must not stay behind.
+; The notices folder of earlier versions; THIRD-PARTY-NOTICES.txt now holds all notices in one file.
 Type: filesandordirs; Name: "{app}\licenses"
 
 [UninstallDelete]
@@ -115,17 +117,16 @@ begin
     (CompareText(RemoveQuotes(Trim(Value)), ExpandConstant('{app}\{#AppExe}')) = 0);
 end;
 
-// Restores the Windows Event Viewer before anything is removed. Only a replacement that points to this installation
-// is removed; one that another program set up is left alone. The replacement is only possible for an installation for
-// all users, whose uninstaller runs with administrator rights.
+// Nothing is changed here, because the user can still cancel and the uninstaller still waits for the app to close.
+// It only refuses to start when this installation replaces the Windows Event Viewer and the uninstaller lacks the
+// administrator rights to restore it, so the uninstall never leaves eventvwr.exe pointing at a deleted program.
 function InitializeUninstall: Boolean;
 begin
   Result := True;
-  if ReplacementIsOurs then
+  if ReplacementIsOurs and not IsAdmin then
   begin
-    RegDeleteValue(HKLM64, ReplacementKey, 'Debugger');
-    if ReplacementIsOurs then
-      Result := UninstallSilent or (MsgBox(CustomMessage('RestoreFailed'), mbError, MB_YESNO or MB_DEFBUTTON2) = IDYES);
+    if not UninstallSilent then MsgBox(CustomMessage('RestoreNeedsAdmin'), mbError, MB_OK);
+    Result := False;
   end;
 end;
 
@@ -133,6 +134,18 @@ procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   CrashLog: String;
 begin
+  // The uninstall is now certain to go ahead: restore the Windows Event Viewer before any file is removed. Only a
+  // replacement that points to this installation is removed; one that another program set up is left alone.
+  if (CurUninstallStep = usUninstall) and ReplacementIsOurs then
+  begin
+    RegDeleteValue(HKLM64, ReplacementKey, 'Debugger');
+    if ReplacementIsOurs then
+    begin
+      Log('The Windows Event Viewer replacement could not be removed.');
+      if not UninstallSilent then MsgBox(CustomMessage('RestoreFailed'), mbError, MB_OK);
+    end;
+  end;
+
   if (CurUninstallStep = usPostUninstall) and DirExists(DataFolder) then
   begin
     // The settings always go. A silent uninstall removes the crash log as well, so nothing is left behind.

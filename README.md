@@ -52,8 +52,7 @@ The installer test installs the app silently into a temporary folder, checks wha
 
 ## License
 
-Nax Event Viewer is source-available under the Nax Source-Available License 1.0. You may install and run the official release builds for any purpose and read the source code, but copying, changing or redistributing it needs written permission. The full text is in [LICENSE](LICENSE).
+This software is under the Nax Source-Available License 1.0. You may install and use the official release builds, privately and at work, and you may read the source code. Modifying the software, redistributing it and selling it need the written permission of the owner. See [LICENSE](LICENSE).
 
-Versions published before this license, up to and including commit 2b65fb2, were published under the GNU General Public License, version 3, and remain available under it.
+Versions published before this license, up to and including commit 2b65fb2, were published under the GNU General Public License, version 3, and remain available under it. Components from other authors that are bundled with the app, such as the .NET runtime and the Windows App SDK, keep their own licenses, which [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt) lists in full.
 
-The app bundles components from other authors, such as the .NET runtime and the Windows App SDK. As section 8 of the license says, they stay under their own licenses, which the installer places in the program folder as THIRD-PARTY-NOTICES.txt and the licenses folder.

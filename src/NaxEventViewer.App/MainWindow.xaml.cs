@@ -175,6 +175,7 @@ public sealed partial class MainWindow : Window
     private void Language_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not RadioMenuFlyoutItem { Tag: string language } || language == Program.Settings.Language) return;
+        string previous = Program.Settings.Language;
         try
         {
             Program.Settings.Language = language;
@@ -182,6 +183,8 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            // Not saved, so not chosen: the menu keeps showing the language the app runs in.
+            Program.Settings.Language = previous;
             ShowProblem(Loc.F("Replace_Failed", ex.Message), offerAdmin: false);
             return;
         }

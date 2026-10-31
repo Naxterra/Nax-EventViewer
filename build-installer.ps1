@@ -44,42 +44,44 @@ $components = @(
     $assets.libraries.PSObject.Properties | Where-Object { $_.Value.type -eq 'package' } | ForEach-Object { $_.Name }
 ) | Where-Object { $_ -notmatch '^Microsoft\.Windows\.SDK\.BuildTools' } | Sort-Object -Unique
 
-$licenseDir = Join-Path $publishDir 'licenses'
-New-Item -ItemType Directory -Force $licenseDir | Out-Null
-$overview = [System.Collections.Generic.List[string]]::new()
-$overview.Add('Third-party components in Nax Event Viewer')
-$overview.Add('')
-$overview.Add('Nax Event Viewer includes the following components from other authors. They are not covered by the Nax Source-Available License; each stays under its own license. The folder named after each component inside the "licenses" folder next to this file holds the license texts and notices its package contains. For a package that contains no license text, that folder holds its copyright notice and the address of its license instead.')
-$overview.Add('')
+# One file with every component's name, version, copyright and full license and notice texts. It is installed next to
+# the app and kept in the repository root, where a change in the bundled packages shows up as a change to the file.
+$notices = [System.Collections.Generic.List[string]]::new()
+$notices.Add('Third-party components in Nax Event Viewer')
+$notices.Add('')
+$notices.Add('Nax Event Viewer includes the following components from other authors. As section 8 of the Nax Source-Available License says, they are not covered by that license; each stays under its own license, whose text follows. The list is taken from the published app and the texts from the packages the build used.')
+$rule = '=' * 100
 foreach ($component in $components) {
     $id, $componentVersion = $component.Split('/')
     $folder = Join-Path $packages "$($id.ToLowerInvariant())\$($componentVersion.ToLowerInvariant())"
     if (-not (Test-Path $folder)) { throw "The package folder of $component was not found at $folder." }
-    $files = Get-ChildItem $folder -File | Where-Object { $_.Name -match '^(license|notice|third-?party-?notices)' }
-    $target = New-Item -ItemType Directory -Force (Join-Path $licenseDir $id)
+    $metadata = ([xml](Get-Content (Get-ChildItem $folder -Filter *.nuspec | Select-Object -First 1).FullName)).package.metadata
+    $notices.Add('')
+    $notices.Add($rule)
+    $notices.Add("$id $componentVersion")
+    if ($metadata.copyright) { $notices.Add($metadata.copyright) }
+    $notices.Add($rule)
+    $files = Get-ChildItem $folder -File | Where-Object { $_.Name -match '^(license|notice|third-?party-?notices)' } | Sort-Object Name
     if ($files) {
-        foreach ($file in $files) { Copy-Item $file.FullName (Join-Path $target $file.Name) }
-        $overview.Add("- $id ${componentVersion}: licenses\$id ($(($files.Name) -join ', '))")
+        foreach ($file in $files) {
+            $notices.Add('')
+            $notices.Add("--- $($file.Name) ---")
+            $notices.Add('')
+            $notices.Add(((Get-Content $file.FullName -Raw) -replace "`r`n", "`n").TrimEnd())
+        }
     }
     else {
-        # The package's own description names its copyright and its license, by expression or by address.
-        $nuspec = [xml](Get-Content (Get-ChildItem $folder -Filter *.nuspec | Select-Object -First 1).FullName)
-        $metadata = $nuspec.package.metadata
-        $licenseText = if ($metadata.license) { "License: $($metadata.license.'#text') (https://spdx.org/licenses/$($metadata.license.'#text').html)" }
-            elseif ($metadata.licenseUrl) { "License: $($metadata.licenseUrl)" }
-            else { throw "The package $component names no license." }
-        Set-Content (Join-Path $target 'LICENSE-NOTICE.txt') @(
-            "$id $componentVersion"
-            ''
-            $metadata.copyright
-            ''
-            'This package contains no license text of its own.'
-            $licenseText
-        ) -Encoding utf8
-        $overview.Add("- $id ${componentVersion}: licenses\$id (LICENSE-NOTICE.txt)")
+        # The package's own description names its license, by expression or by address.
+        $notices.Add('')
+        $notices.Add('This package contains no license text of its own.')
+        if ($metadata.license) { $notices.Add("License: $($metadata.license.'#text') (https://spdx.org/licenses/$($metadata.license.'#text').html)") }
+        elseif ($metadata.licenseUrl) { $notices.Add("License: $($metadata.licenseUrl)") }
+        else { throw "The package $component names no license." }
     }
 }
-Set-Content (Join-Path $publishDir 'THIRD-PARTY-NOTICES.txt') $overview -Encoding utf8
+$noticeText = (($notices -join "`n") -replace "`n", "`r`n") + "`r`n"
+[System.IO.File]::WriteAllText((Join-Path $publishDir 'THIRD-PARTY-NOTICES.txt'), $noticeText, [System.Text.UTF8Encoding]::new($false))
+[System.IO.File]::WriteAllText((Join-Path $root 'THIRD-PARTY-NOTICES.txt'), $noticeText, [System.Text.UTF8Encoding]::new($false))
 
 Write-Host "Building the installer"
 & $IsccPath /Q "/DAppVersion=$Version" "/DPublishDir=$publishDir" (Join-Path $root 'installer\Nax-EventViewer.iss')

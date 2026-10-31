@@ -8,7 +8,7 @@
     <AssemblyName>Nax-EventViewer</AssemblyName>
     <Product>Nax-EventViewer</Product>
     <Company>Naxterra</Company>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\Nax-EventViewer.ico</ApplicationIcon>
     <Platforms>x64;ARM64</Platforms>
@@ -18,6 +18,9 @@
     <WindowsPackageType>None</WindowsPackageType>
     <!-- Both .NET and the Windows App SDK are shipped with the app, so it runs on a PC that has neither installed. -->
     <SelfContained>true</SelfContained>
+    <!-- Windows may start this app in place of eventvwr.exe. A startup hook named in the user's environment must never
+         load code into it, least of all into a copy that runs with administrator rights. -->
+    <StartupHookSupport>false</StartupHookSupport>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <WindowsAppSdkDeploymentManagerInitialize>false</WindowsAppSdkDeploymentManagerInitialize>
     <EnableMsixTooling>false</EnableMsixTooling>
