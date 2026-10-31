@@ -91,14 +91,14 @@ internal sealed unsafe class MessageFormatter : IDisposable
     private string DescribeWithoutMessage(nint evt, EventItem item)
     {
         var text = new StringBuilder();
-        text.Append("Windows has no message text for event ").Append(item.EventId).Append(" from ").Append(item.Provider.Length == 0 ? "an unnamed source" : item.Provider).Append('.');
+        text.Append(CoreText.F("Message_NoText", item.EventId, item.Provider.Length == 0 ? CoreText.Get("Message_UnnamedSource") : item.Provider));
         string? xml = RenderXml(evt);
         if (xml is not null)
         {
             var data = ExtractData(xml);
             if (data.Count > 0)
             {
-                text.Append(" The event contains this data:");
+                text.Append(' ').Append(CoreText.Get("Message_DataFollows"));
                 foreach (var (name, value) in data)
                 {
                     text.AppendLine();

@@ -55,7 +55,7 @@ public sealed unsafe class LiveSubscription : IDisposable
         if (afterBookmark is not null && bookmark == 0)
         {
             // Watching only for future events instead would silently miss what was written since the bookmark.
-            var error = EventLogException.FromLastError($"Windows could not continue watching {channel} from where it stopped.");
+            var error = EventLogException.FromLastError(CoreText.F("Error_ContinueWatching", channel));
             subscription.Dispose();
             throw error;
         }
@@ -68,7 +68,7 @@ public sealed unsafe class LiveSubscription : IDisposable
             subscription._subscription = Wevtapi.EvtSubscribe(0, 0, channel, "*", bookmark, subscription._id, &Callback, flags);
             if (subscription._subscription == 0)
             {
-                var error = EventLogException.FromLastError($"Windows could not watch {channel} for new events.");
+                var error = EventLogException.FromLastError(CoreText.F("Error_Watch", channel));
                 subscription.Dispose();
                 throw error;
             }
@@ -116,7 +116,7 @@ public sealed unsafe class LiveSubscription : IDisposable
         }
         try
         {
-            _onError($"Live updates for {_channel} stopped. {new System.ComponentModel.Win32Exception(error).Message}");
+            _onError(CoreText.F("Live_Stopped", _channel, new System.ComponentModel.Win32Exception(error).Message));
         }
         catch (Exception)
         {

@@ -10,7 +10,7 @@ public static class EventExport
     /// <summary>Copies every event of a log or .evtx file into a new .evtx file. The source is only read.</summary>
     public static void SaveEvtx(LogSource source, string targetPath)
     {
-        if (!source.SupportsEvtxExport) throw new InvalidOperationException("Only a single log or file can be saved as .evtx.");
+        if (!source.SupportsEvtxExport) throw new InvalidOperationException(CoreText.Get("Error_EvtxSingleOnly"));
         // No EvtExportLogTolerateQueryErrors: with it, a source that cannot be read gives an empty file instead of an error.
         int flags = source.Kind == LogSourceKind.File ? Wevtapi.EvtExportLogFilePath : Wevtapi.EvtExportLogChannelPath;
 
@@ -22,7 +22,7 @@ public static class EventExport
         try
         {
             if (!Wevtapi.EvtExportLog(0, source.Path, "*", localCopy, flags))
-                throw EventLogException.FromLastError($"Windows could not save {source.DisplayName}.");
+                throw EventLogException.FromLastError(CoreText.F("Error_Save", source.DisplayName));
             AtomicFile.Write(targetPath, output =>
             {
                 using var input = new FileStream(localCopy, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16);
@@ -66,7 +66,7 @@ public static class EventExport
         AtomicFile.Write(targetPath, stream =>
         {
             using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true), 1 << 16, leaveOpen: true);
-            writer.Write("Level,Date and time,Date and time (UTC),Source,Event ID,Task category,Log,Computer,Record ID,Message\r\n");
+            writer.Write(CoreText.Get("Csv_Header") + "\r\n");
             foreach (EventItem item in items)
             {
                 WriteRow(writer,
@@ -82,7 +82,7 @@ public static class EventExport
                     item.Message ?? "");
                 written++;
             }
-            if (written == 0) throw new NothingToSaveException("The list has no events to save.");
+            if (written == 0) throw new NothingToSaveException(CoreText.Get("Error_NothingToSave"));
         });
         return written;
     }

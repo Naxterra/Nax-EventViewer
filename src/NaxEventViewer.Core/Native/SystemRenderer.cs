@@ -33,7 +33,7 @@ internal sealed unsafe class SystemRenderer : IDisposable
     {
         _strings = strings;
         _context = Wevtapi.EvtCreateRenderContext(0, 0, Wevtapi.EvtRenderContextSystem);
-        if (_context == 0) throw new EventLogException("Windows could not prepare to read events.", Marshal.GetLastPInvokeError());
+        if (_context == 0) throw new EventLogException(CoreText.Get("Error_PrepareRead"), Marshal.GetLastPInvokeError());
     }
 
     /// <summary>

@@ -140,6 +140,7 @@ try {
     # A crash log and a log copy written while the app was installed must go with the app.
     New-Item -ItemType Directory -Force $crashFolder | Out-Null
     Set-Content (Join-Path $crashFolder 'crash.log') 'test entry'
+    Set-Content (Join-Path $crashFolder 'settings.json') '{"Language":"de-DE"}'
     Set-Content $leftoverCopy 'test copy'
 
     $problems = @()
@@ -156,10 +157,10 @@ try {
     if (Test-Path $progIdKey) { $problems += 'the Open with program entry is still there' }
     if (OpenWithValuePresent) { $problems += 'the .evtx Open with value is still there' }
     if (-not $evtxKeyExistedBefore -and (Test-Path $evtxKey)) { $problems += 'the .evtx key that the installer created is still there' }
-    if (Test-Path $crashFolder) { $problems += 'the crash log folder is still there' }
+    if (Test-Path $crashFolder) { $problems += 'the folder with the settings and the crash log is still there' }
     if (Test-Path $leftoverCopy) { $problems += 'the log copy left in the temporary folder is still there' }
-    Report 'silent_uninstall_leaves_no_files_shortcuts_registry_entries_crash_log_or_log_copies' `
-        'A silent uninstallation removes the program folder, both shortcuts, the Installed apps entry, the Open with entries, the crash log folder and log copies left in the temporary folder.' $problems
+    Report 'silent_uninstall_leaves_no_files_shortcuts_registry_entries_settings_crash_log_or_log_copies' `
+        'A silent uninstallation removes the program folder, both shortcuts, the Installed apps entry, the Open with entries, the settings, the crash log and log copies left in the temporary folder.' $problems
 }
 finally {
     Stop-InstalledApp $app

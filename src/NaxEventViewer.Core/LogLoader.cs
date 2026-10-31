@@ -42,7 +42,7 @@ public static class LogLoader
         {
             callbacks.UnexpectedError?.Invoke(ex);
             summary = new ReadSummary { Count = all.Count };
-            summary.AddProblem($"Reading stopped early because of an unexpected error. {ex.Message}");
+            summary.AddProblem(CoreText.F("Error_Unexpected", ex.Message));
         }
         if (cancellation.IsCancellationRequested) return;
         callbacks.RecordsDone(summary);

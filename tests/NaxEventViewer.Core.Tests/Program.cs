@@ -1,9 +1,13 @@
 using NaxEventViewer.Core.Tests;
 
 // Console test runner: prints every test as file::name, its scenario and PASS or FAIL. The exit code is the number of
-// failures.
+// failures. The tests compare English texts, so they run in English whatever the Windows display language is.
+System.Globalization.CultureInfo.DefaultThreadCurrentUICulture = System.Globalization.CultureInfo.GetCultureInfo("en-US");
+System.Globalization.CultureInfo.CurrentUICulture = System.Globalization.CultureInfo.GetCultureInfo("en-US");
 var suites = new (string File, IEnumerable<(string Name, string Scenario, Action Body)> Tests)[]
 {
+    ("LanguageTests.cs", LanguageTests.All()),
+    ("ReplacementTests.cs", ReplacementTests.All()),
     ("FilterTests.cs", FilterTests.All()),
     ("ChannelTreeTests.cs", ChannelTreeTests.All()),
     ("ExportTests.cs", ExportTests.All()),

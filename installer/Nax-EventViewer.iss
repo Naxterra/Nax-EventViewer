@@ -45,9 +45,27 @@ CloseApplications=yes
 ; program file is left behind.
 AppMutex=NaxEventViewer.Running
 
+[Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "german"; MessagesFile: "compiler:Languages\German.isl"
+
+[CustomMessages]
+english.OpenWithTask=Offer {#AppName} in the "Open with" menu of .evtx files (Windows Event Viewer stays the default)
+german.OpenWithTask={#AppName} im Menü „Öffnen mit“ von .evtx-Dateien anbieten (die Windows-Ereignisanzeige bleibt Standard)
+english.DesktopTask=Create a desktop shortcut
+german.DesktopTask=Desktopverknüpfung erstellen
+english.LaunchApp=Start {#AppName}
+german.LaunchApp={#AppName} starten
+english.EvtxFileType=Event log file
+german.EvtxFileType=Ereignisprotokolldatei
+english.CrashLogQuestion={#AppName} kept a crash log in %1.%n%nDo you want to delete it as well?
+german.CrashLogQuestion={#AppName} hat ein Absturzprotokoll in %1 gespeichert.%n%nMöchten Sie es ebenfalls löschen?
+english.RestoreFailed=The Windows Event Viewer could not be restored, so Windows still starts {#AppName} in its place. If you uninstall now, the Win+X entry for the Event Viewer will not open anything until the setting is removed.%n%nUninstall anyway?
+german.RestoreFailed=Die Windows-Ereignisanzeige konnte nicht wiederhergestellt werden, daher startet Windows weiterhin {#AppName} an ihrer Stelle. Wenn Sie jetzt deinstallieren, öffnet der Eintrag für die Ereignisanzeige im Win+X-Menü nichts mehr, bis die Einstellung entfernt ist.%n%nTrotzdem deinstallieren?
+
 [Tasks]
-Name: "openwith"; Description: "Offer {#AppName} in the ""Open with"" menu of .evtx files (Windows Event Viewer stays the default)"
-Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
+Name: "openwith"; Description: "{cm:OpenWithTask}"
+Name: "desktopicon"; Description: "{cm:DesktopTask}"; Flags: unchecked
 
 [Files]
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -63,7 +81,7 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 Root: HKA; Subkey: "Software\Classes\.evtx"; Flags: uninsdeletekeyifempty; Tasks: openwith
 Root: HKA; Subkey: "Software\Classes\.evtx\OpenWithProgids"; Flags: uninsdeletekeyifempty; Tasks: openwith
 Root: HKA; Subkey: "Software\Classes\.evtx\OpenWithProgids"; ValueType: string; ValueName: "{#ProgId}"; ValueData: ""; Flags: uninsdeletevalue; Tasks: openwith
-Root: HKA; Subkey: "Software\Classes\{#ProgId}"; ValueType: string; ValueName: ""; ValueData: "Event log file"; Flags: uninsdeletekey; Tasks: openwith
+Root: HKA; Subkey: "Software\Classes\{#ProgId}"; ValueType: string; ValueName: ""; ValueData: "{cm:EvtxFileType}"; Flags: uninsdeletekey; Tasks: openwith
 Root: HKA; Subkey: "Software\Classes\{#ProgId}\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExe},0"; Tasks: openwith
 Root: HKA; Subkey: "Software\Classes\{#ProgId}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; Tasks: openwith
 
@@ -76,22 +94,55 @@ Type: filesandordirs; Name: "{app}\licenses"
 Type: files; Name: "{%TEMP}\nax-eventviewer-export-*.evtx"
 
 [Run]
-Filename: "{app}\{#AppExe}"; Description: "Start {#AppName}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchApp}"; Flags: nowait postinstall skipifsilent
 
 [Code]
-// The app writes nothing but a crash log, into this folder of the user's local application data.
-function CrashLogFolder: String;
+const
+  ReplacementKey = 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\eventvwr.exe';
+
+// The app writes its settings and, after a crash, a crash log into this folder of the user's local application data.
+function DataFolder: String;
 begin
   Result := ExpandConstant('{localappdata}\Nax-EventViewer');
 end;
 
-procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+// True when Windows starts this installation's program in place of the Windows Event Viewer.
+function ReplacementIsOurs: Boolean;
+var
+  Value: String;
 begin
-  if (CurUninstallStep = usPostUninstall) and DirExists(CrashLogFolder) then
+  Result := RegQueryStringValue(HKLM64, ReplacementKey, 'Debugger', Value) and
+    (CompareText(RemoveQuotes(Trim(Value)), ExpandConstant('{app}\{#AppExe}')) = 0);
+end;
+
+// Restores the Windows Event Viewer before anything is removed. Only a replacement that points to this installation
+// is removed; one that another program set up is left alone. The replacement is only possible for an installation for
+// all users, whose uninstaller runs with administrator rights.
+function InitializeUninstall: Boolean;
+begin
+  Result := True;
+  if ReplacementIsOurs then
   begin
-    // A silent uninstall removes the crash log as well, so nothing is left behind.
-    if UninstallSilent or (MsgBox('Nax Event Viewer kept a crash log in ' + CrashLogFolder + '.' + #13#10 + #13#10 +
-      'Do you want to delete it as well?', mbConfirmation, MB_YESNO) = IDYES) then
-      DelTree(CrashLogFolder, True, True, True);
+    RegDeleteValue(HKLM64, ReplacementKey, 'Debugger');
+    if ReplacementIsOurs then
+      Result := UninstallSilent or (MsgBox(CustomMessage('RestoreFailed'), mbError, MB_YESNO or MB_DEFBUTTON2) = IDYES);
+  end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  CrashLog: String;
+begin
+  if (CurUninstallStep = usPostUninstall) and DirExists(DataFolder) then
+  begin
+    // The settings always go. A silent uninstall removes the crash log as well, so nothing is left behind.
+    DeleteFile(DataFolder + '\settings.json');
+    DeleteFile(DataFolder + '\settings.json.tmp');
+    CrashLog := DataFolder + '\crash.log';
+    if FileExists(CrashLog) and (UninstallSilent or
+      (MsgBox(FmtMessage(CustomMessage('CrashLogQuestion'), [CrashLog]), mbConfirmation, MB_YESNO) = IDYES)) then
+      DeleteFile(CrashLog);
+    // Removed only when nothing else is left in it.
+    RemoveDir(DataFolder);
   end;
 end;

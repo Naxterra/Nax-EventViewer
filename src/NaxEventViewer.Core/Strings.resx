@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <data name="Level_Critical" xml:space="preserve"><value>Critical</value></data>
+  <data name="Level_Error" xml:space="preserve"><value>Error</value></data>
+  <data name="Level_Warning" xml:space="preserve"><value>Warning</value></data>
+  <data name="Level_Information" xml:space="preserve"><value>Information</value></data>
+  <data name="Level_Verbose" xml:space="preserve"><value>Verbose</value></data>
+  <data name="Level_AuditSuccess" xml:space="preserve"><value>Audit Success</value></data>
+  <data name="Level_AuditFailure" xml:space="preserve"><value>Audit Failure</value></data>
+  <data name="Task_None" xml:space="preserve"><value>None</value></data>
+  <data name="Overview_Name" xml:space="preserve"><value>Problems in all logs</value></data>
+  <data name="Csv_Header" xml:space="preserve"><value>Level,Date and time,Date and time (UTC),Source,Event ID,Task category,Log,Computer,Record ID,Message</value></data>
+  <data name="Logs_Generic" xml:space="preserve"><value>the logs</value></data>
+  <data name="Error_ListLogs" xml:space="preserve"><value>Windows could not list the logs.</value></data>
+  <data name="Error_ListingStopped" xml:space="preserve"><value>Windows stopped listing the logs after {0}. {1}</value></data>
+  <data name="Error_EvtxSingleOnly" xml:space="preserve"><value>Only a single log or file can be saved as .evtx.</value></data>
+  <data name="Error_Save" xml:space="preserve"><value>Windows could not save {0}.</value></data>
+  <data name="Error_NothingToSave" xml:space="preserve"><value>The list has no events to save.</value></data>
+  <data name="Error_ReadAgain" xml:space="preserve"><value>The event could not be read again. {0}</value></data>
+  <data name="Error_Open" xml:space="preserve"><value>Windows could not open {0}.</value></data>
+  <data name="Error_ReadStopped" xml:space="preserve"><value>Reading {0} stopped early.</value></data>
+  <data name="Error_Unexpected" xml:space="preserve"><value>Reading stopped early because of an unexpected error. {0}</value></data>
+  <data name="Error_PrepareRead" xml:space="preserve"><value>Windows could not prepare to read events.</value></data>
+  <data name="Error_ContinueWatching" xml:space="preserve"><value>Windows could not continue watching {0} from where it stopped.</value></data>
+  <data name="Error_Watch" xml:space="preserve"><value>Windows could not watch {0} for new events.</value></data>
+  <data name="Live_Stopped" xml:space="preserve"><value>Live updates for {0} stopped. {1}</value></data>
+  <data name="Message_NoText" xml:space="preserve"><value>Windows has no message text for event {0} from {1}.</value></data>
+  <data name="Message_UnnamedSource" xml:space="preserve"><value>an unnamed source</value></data>
+  <data name="Message_DataFollows" xml:space="preserve"><value>The event contains this data:</value></data>
+  <data name="Replace_NeedsMachineInstall" xml:space="preserve"><value>The Windows Event Viewer can only be replaced by a copy installed for all users, in a folder that only administrators can change.</value></data>
+</root>

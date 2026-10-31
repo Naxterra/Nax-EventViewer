@@ -29,7 +29,7 @@ public static unsafe class ChannelCatalog
     {
         var channels = new List<string>();
         nint enumerator = Wevtapi.EvtOpenChannelEnum(0, 0);
-        if (enumerator == 0) throw EventLogException.FromLastError("Windows could not list the logs.");
+        if (enumerator == 0) throw EventLogException.FromLastError(CoreText.Get("Error_ListLogs"));
         try
         {
             var buffer = new char[512];
@@ -52,7 +52,7 @@ public static unsafe class ChannelCatalog
                     continue;
                 }
                 if (step == ListingStep.Done) break;
-                throw new EventLogException($"Windows stopped listing the logs after {channels.Count}. {new System.ComponentModel.Win32Exception(error).Message}", error);
+                throw new EventLogException(CoreText.F("Error_ListingStopped", channels.Count, new System.ComponentModel.Win32Exception(error).Message), error);
             }
         }
         finally

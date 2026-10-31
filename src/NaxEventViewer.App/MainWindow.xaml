@@ -31,7 +31,7 @@
             </Grid.ColumnDefinitions>
             <Image Source="ms-appx:///Assets/Nax-EventViewer.ico" Width="16" Height="16" VerticalAlignment="Center" />
             <TextBlock Grid.Column="1" Text="Nax Event Viewer" VerticalAlignment="Center" Style="{StaticResource CaptionTextBlockStyle}" />
-            <TextBlock x:Name="ElevationText" Grid.Column="2" Text="Administrator" VerticalAlignment="Center" Visibility="Collapsed"
+            <TextBlock x:Name="ElevationText" Grid.Column="2" VerticalAlignment="Center" Visibility="Collapsed"
                        Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
         </Grid>
 
@@ -45,46 +45,49 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <TextBox x:Name="SearchBox" MinWidth="220" VerticalAlignment="Center"
-                     PlaceholderText="Search messages, sources and IDs (Ctrl+F)" TextChanged="FilterText_Changed" />
+                     TextChanged="FilterText_Changed" />
             <TextBox x:Name="EventIdBox" Grid.Column="1" Width="190" VerticalAlignment="Center"
-                     PlaceholderText="Event IDs, such as 41, -7036" TextChanged="FilterText_Changed"
-                     ToolTipService.ToolTip="IDs and ranges separated by commas, such as 4624, 1000-1010. A minus sign excludes an ID." />
-            <ComboBox x:Name="TimeBox" Grid.Column="2" Width="150" VerticalAlignment="Center" SelectedIndex="0" SelectionChanged="TimeBox_SelectionChanged">
-                <x:String>Any time</x:String>
-                <x:String>Last hour</x:String>
-                <x:String>Last 24 hours</x:String>
-                <x:String>Last 7 days</x:String>
-                <x:String>Last 30 days</x:String>
-            </ComboBox>
+                     TextChanged="FilterText_Changed" />
+            <ComboBox x:Name="TimeBox" Grid.Column="2" Width="150" VerticalAlignment="Center" SelectionChanged="TimeBox_SelectionChanged" />
             <CommandBar Grid.Column="4" DefaultLabelPosition="Right" Background="Transparent" IsOpen="False" VerticalAlignment="Center">
-                <AppBarButton Label="Refresh" Icon="Refresh" Click="Refresh_Click" ToolTipService.ToolTip="Read the log again (F5)" />
-                <AppBarToggleButton x:Name="LiveToggle" Label="Live" IsChecked="True" Click="LiveToggle_Click"
-                                    ToolTipService.ToolTip="Show new events as soon as Windows writes them">
+                <AppBarButton x:Name="RefreshButton" Icon="Refresh" Click="Refresh_Click" />
+                <AppBarToggleButton x:Name="LiveToggle" IsChecked="True" Click="LiveToggle_Click">
                     <AppBarToggleButton.Icon>
                         <FontIcon Glyph="&#xE768;" />
                     </AppBarToggleButton.Icon>
                 </AppBarToggleButton>
-                <AppBarButton Label="Open file" Icon="OpenFile" Click="Open_Click" ToolTipService.ToolTip="Open a saved .evtx file (Ctrl+O)" />
-                <AppBarButton Label="Save" Icon="Save">
+                <AppBarButton x:Name="OpenButton" Icon="OpenFile" Click="Open_Click" />
+                <AppBarButton x:Name="SaveButton" Icon="Save">
                     <AppBarButton.Flyout>
                         <MenuFlyout Placement="BottomEdgeAlignedRight">
-                            <MenuFlyoutItem Text="Shown events as CSV…" Click="SaveCsv_Click" KeyboardAcceleratorTextOverride="Ctrl+S" />
-                            <MenuFlyoutItem x:Name="SaveEvtxItem" Text="Whole log as .evtx…" Click="SaveEvtx_Click" />
+                            <MenuFlyoutItem x:Name="SaveCsvItem" Click="SaveCsv_Click" />
+                            <MenuFlyoutItem x:Name="SaveEvtxItem" Click="SaveEvtx_Click" />
                         </MenuFlyout>
                     </AppBarButton.Flyout>
                 </AppBarButton>
-                <AppBarButton x:Name="AdminButton" Label="Run as administrator" Click="Admin_Click"
-                              ToolTipService.ToolTip="Restart with administrator rights, which the Security log and some other logs need">
+                <AppBarButton x:Name="AdminButton" Click="Admin_Click">
                     <AppBarButton.Icon>
                         <FontIcon Glyph="&#xE7EF;" />
                     </AppBarButton.Icon>
+                </AppBarButton>
+                <AppBarButton x:Name="SettingsButton" Icon="Setting">
+                    <AppBarButton.Flyout>
+                        <MenuFlyout x:Name="SettingsMenu" Placement="BottomEdgeAlignedRight" Opening="SettingsMenu_Opening">
+                            <MenuFlyoutSubItem x:Name="LanguageMenu">
+                                <RadioMenuFlyoutItem x:Name="LanguageSystemItem" GroupName="Language" Tag="" Click="Language_Click" />
+                                <RadioMenuFlyoutItem x:Name="LanguageEnglishItem" GroupName="Language" Tag="en-US" Click="Language_Click" />
+                                <RadioMenuFlyoutItem x:Name="LanguageGermanItem" GroupName="Language" Tag="de-DE" Click="Language_Click" />
+                            </MenuFlyoutSubItem>
+                            <ToggleMenuFlyoutItem x:Name="ReplaceItem" Click="Replace_Click" />
+                        </MenuFlyout>
+                    </AppBarButton.Flyout>
                 </AppBarButton>
             </CommandBar>
         </Grid>
 
         <InfoBar x:Name="ProblemBar" Grid.Row="2" Margin="12,0,12,8" IsOpen="False" Severity="Warning" IsClosable="True">
             <InfoBar.ActionButton>
-                <Button x:Name="ProblemAdminButton" Content="Restart as administrator" Click="Admin_Click" Visibility="Collapsed" />
+                <Button x:Name="ProblemAdminButton" Click="Admin_Click" Visibility="Collapsed" />
             </InfoBar.ActionButton>
         </InfoBar>
 
@@ -119,7 +122,7 @@
                         </DataTemplate>
                     </TreeView.ItemTemplate>
                 </TreeView>
-                <CheckBox x:Name="ShowAllLogsBox" Grid.Row="1" Margin="12,6" Content="Show empty, analytic and debug logs" Click="ShowAllLogs_Click" />
+                <CheckBox x:Name="ShowAllLogsBox" Grid.Row="1" Margin="12,6" Click="ShowAllLogs_Click" />
             </Grid>
 
             <Grid Grid.Column="1">
@@ -182,12 +185,12 @@
                         <ColumnDefinition Width="140" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
-                    <Button x:Name="LevelHeader" Content="Level" Tag="Level" Style="{StaticResource ColumnHeaderButtonStyle}" Click="ColumnHeader_Click" />
-                    <Button x:Name="TimeHeader" Grid.Column="1" Content="Date and time" Tag="Time" Style="{StaticResource ColumnHeaderButtonStyle}" Click="ColumnHeader_Click" />
-                    <Button x:Name="SourceHeader" Grid.Column="2" Content="Source" Tag="Source" Style="{StaticResource ColumnHeaderButtonStyle}" Click="ColumnHeader_Click" />
-                    <Button x:Name="EventIdHeader" Grid.Column="3" Content="ID" Tag="EventId" Style="{StaticResource ColumnHeaderButtonStyle}" Click="ColumnHeader_Click" />
-                    <Button x:Name="TaskHeader" Grid.Column="4" Content="Task category" Tag="Task" Style="{StaticResource ColumnHeaderButtonStyle}" Click="ColumnHeader_Click" />
-                    <TextBlock Grid.Column="5" Text="Message" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <Button x:Name="LevelHeader" Tag="Level" Style="{StaticResource ColumnHeaderButtonStyle}" Click="ColumnHeader_Click" />
+                    <Button x:Name="TimeHeader" Grid.Column="1" Tag="Time" Style="{StaticResource ColumnHeaderButtonStyle}" Click="ColumnHeader_Click" />
+                    <Button x:Name="SourceHeader" Grid.Column="2" Tag="Source" Style="{StaticResource ColumnHeaderButtonStyle}" Click="ColumnHeader_Click" />
+                    <Button x:Name="EventIdHeader" Grid.Column="3" Tag="EventId" Style="{StaticResource ColumnHeaderButtonStyle}" Click="ColumnHeader_Click" />
+                    <Button x:Name="TaskHeader" Grid.Column="4" Tag="Task" Style="{StaticResource ColumnHeaderButtonStyle}" Click="ColumnHeader_Click" />
+                    <TextBlock x:Name="MessageHeader" Grid.Column="5" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 </Grid>
 
                 <ListView x:Name="EventList" Grid.Row="2" SelectionMode="Extended" SelectionChanged="EventList_SelectionChanged"
@@ -229,7 +232,7 @@
 
                 <!-- Detail pane: message on the left, fields on the right -->
                 <Grid Grid.Row="3" Background="{ThemeResource LayerFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,1,0,0">
-                    <TextBlock x:Name="DetailEmptyText" Text="Select an event to see its details." HorizontalAlignment="Center" VerticalAlignment="Center"
+                    <TextBlock x:Name="DetailEmptyText" HorizontalAlignment="Center" VerticalAlignment="Center"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     <Grid x:Name="DetailPanel" Padding="16,10,16,10" RowSpacing="6" Visibility="Collapsed">
                         <Grid.RowDefinitions>
@@ -249,10 +252,10 @@
                                 <TextBlock x:Name="DetailSubtitle" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
                             </StackPanel>
                             <SelectorBar x:Name="DetailTabs" Grid.Column="2" SelectionChanged="DetailTabs_SelectionChanged">
-                                <SelectorBarItem x:Name="GeneralTab" Text="General" IsSelected="True" />
-                                <SelectorBarItem x:Name="XmlTab" Text="XML" />
+                                <SelectorBarItem x:Name="GeneralTab" IsSelected="True" />
+                                <SelectorBarItem x:Name="XmlTab" />
                             </SelectorBar>
-                            <Button Grid.Column="3" VerticalAlignment="Center" Click="CopyDetail_Click" ToolTipService.ToolTip="Copy the event as text">
+                            <Button x:Name="CopyDetailButton" Grid.Column="3" VerticalAlignment="Center" Click="CopyDetail_Click">
                                 <FontIcon Glyph="&#xE8C8;" FontSize="14" />
                             </Button>
                         </Grid>

@@ -87,6 +87,7 @@ public sealed partial class MainWindow : Window
 
         EventList.ItemsSource = _view;
         LogTree.ItemsSource = _roots;
+        LocalizeStaticText();
         CreateLevelButtons();
         UpdateSortHeaders();
 
@@ -114,17 +115,140 @@ public sealed partial class MainWindow : Window
         Closed += (_, _) => StopLoading();
     }
 
+    /// <summary>Fills in the fixed labels of the window in the interface language.</summary>
+    private void LocalizeStaticText()
+    {
+        ElevationText.Text = Loc.Get("Elevation_Administrator");
+        SearchBox.PlaceholderText = Loc.Get("Search_Placeholder");
+        EventIdBox.PlaceholderText = Loc.Get("EventIds_Placeholder");
+        ToolTipService.SetToolTip(EventIdBox, Loc.Get("EventIds_ToolTip"));
+        foreach (string key in new[] { "Time_Any", "Time_Hour", "Time_Day", "Time_Week", "Time_Month" }) TimeBox.Items.Add(Loc.Get(key));
+        TimeBox.SelectedIndex = 0;
+
+        void Command(AppBarButton button, string label, string? tip = null)
+        {
+            button.Label = Loc.Get(label);
+            if (tip is not null) ToolTipService.SetToolTip(button, Loc.Get(tip));
+        }
+        Command(RefreshButton, "Command_Refresh", "Command_RefreshTip");
+        LiveToggle.Label = Loc.Get("Command_Live");
+        ToolTipService.SetToolTip(LiveToggle, Loc.Get("Command_LiveTip"));
+        Command(OpenButton, "Command_Open", "Command_OpenTip");
+        Command(SaveButton, "Command_Save");
+        SaveCsvItem.Text = Loc.Get("Command_SaveCsv");
+        SaveCsvItem.KeyboardAcceleratorTextOverride = Loc.Get("Command_SaveCsvKey");
+        SaveEvtxItem.Text = Loc.Get("Command_SaveEvtx");
+        Command(AdminButton, "Command_Admin", "Command_AdminTip");
+        Command(SettingsButton, "Command_Settings");
+        LanguageMenu.Text = Loc.Get("Settings_Language");
+        LanguageSystemItem.Text = Loc.Get("Language_System");
+        LanguageEnglishItem.Text = Loc.Get("Language_English");
+        LanguageGermanItem.Text = Loc.Get("Language_German");
+        ReplaceItem.Text = Loc.Get("Settings_Replace");
+
+        ProblemAdminButton.Content = Loc.Get("Problem_RestartAdmin");
+        ShowAllLogsBox.Content = Loc.Get("Tree_ShowAll");
+        MessageHeader.Text = Loc.Get("Column_Message");
+        DetailEmptyText.Text = Loc.Get("Detail_SelectEvent");
+        GeneralTab.Text = Loc.Get("Detail_General");
+        XmlTab.Text = Loc.Get("Detail_Xml");
+        ToolTipService.SetToolTip(CopyDetailButton, Loc.Get("Detail_CopyTip"));
+    }
+
+    // ----- Settings -----
+
+    private void SettingsMenu_Opening(object sender, object e)
+    {
+        string language = Program.Settings.Language;
+        LanguageSystemItem.IsChecked = language is not (AppSettings.English or AppSettings.German);
+        LanguageEnglishItem.IsChecked = language == AppSettings.English;
+        LanguageGermanItem.IsChecked = language == AppSettings.German;
+
+        // The replacement can only point at a copy installed for all users, in a folder only administrators can change.
+        string? self = Environment.ProcessPath;
+        ReplaceItem.IsChecked = self is not null && EventViewerReplacement.IsReplacedBy(self);
+        ReplaceItem.IsEnabled = self is not null && (ReplaceItem.IsChecked || EventViewerReplacement.CanReplaceWith(self));
+        ToolTipService.SetToolTip(ReplaceItem, ReplaceItem.IsEnabled ? null : CoreText.Get("Replace_NeedsMachineInstall"));
+    }
+
+    /// <summary>Saves the chosen language and restarts the app in it, on the same log.</summary>
+    private void Language_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not RadioMenuFlyoutItem { Tag: string language } || language == Program.Settings.Language) return;
+        try
+        {
+            Program.Settings.Language = language;
+            Program.Settings.Save();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            ShowProblem(Loc.F("Replace_Failed", ex.Message), offerAdmin: false);
+            return;
+        }
+        if (Environment.ProcessPath is not { } executable) return;
+        var start = new ProcessStartInfo(executable) { UseShellExecute = false };
+        foreach (string argument in StartupArguments.For(_source)) start.ArgumentList.Add(argument);
+        try
+        {
+            Process.Start(start);
+            Close();
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            ShowProblem(Loc.F("Replace_Failed", ex.Message), offerAdmin: false);
+        }
+    }
+
+    /// <summary>Turns the replacement of the Windows Event Viewer on or off through a short-lived elevated copy of the app.</summary>
+    private async void Replace_Click(object sender, RoutedEventArgs e)
+    {
+        bool enable = ReplaceItem.IsChecked;
+        try
+        {
+            if (Environment.ProcessPath is not { } self) return;
+            if (enable && EventViewerReplacement.OtherTarget(self) is { } other)
+            {
+                ShowProblem(Loc.F("Replace_Other", Path.GetFileName(other)), offerAdmin: false);
+                return;
+            }
+            var start = new ProcessStartInfo(self) { UseShellExecute = true, Verb = "runas", WindowStyle = ProcessWindowStyle.Hidden };
+            start.ArgumentList.Add(enable ? Program.ReplaceOnArgument : Program.ReplaceOffArgument);
+            start.ArgumentList.Add(self);
+            int exitCode;
+            try
+            {
+                using Process helper = Process.Start(start)!;
+                await helper.WaitForExitAsync();
+                exitCode = helper.ExitCode;
+            }
+            catch (System.ComponentModel.Win32Exception)
+            {
+                ShowProblem(Loc.Get("Replace_Cancelled"), offerAdmin: false);
+                return;
+            }
+            if (exitCode == 0) ShowInfo(Loc.Get(enable ? "Replace_On" : "Replace_Off"));
+            else if (exitCode == Program.HelperNotAdminOnlyFolder) ShowProblem(CoreText.Get("Replace_NeedsMachineInstall"), offerAdmin: false);
+            else ShowProblem(Loc.F("Replace_ExitCode", exitCode), offerAdmin: false);
+        }
+        catch (Exception ex)
+        {
+            // This is an async void handler, so an exception that escaped here would end the app.
+            CrashLog.Write(ex);
+            ShowProblem(Loc.F("Replace_Failed", ex.Message), offerAdmin: false);
+        }
+    }
+
     // ----- Log tree -----
 
     private void BuildTree()
     {
-        _roots.Add(new LogNode(LogNodeKind.Overview, "Problems in all logs (24 h)"));
-        var windowsLogs = new LogNode(LogNodeKind.Folder, "Windows Logs") { IsExpanded = true };
+        _roots.Add(new LogNode(LogNodeKind.Overview, Loc.Get("Tree_Overview")));
+        var windowsLogs = new LogNode(LogNodeKind.Folder, Loc.Get("Tree_WindowsLogs")) { IsExpanded = true };
         foreach (string channel in ChannelCatalog.WindowsLogs)
             windowsLogs.Children.Add(new LogNode(LogNodeKind.Channel, channel, channel));
         _roots.Add(windowsLogs);
-        _servicesFolder = new LogNode(LogNodeKind.Folder, "Applications and Services Logs");
-        _servicesFolder.Children.Add(new LogNode(LogNodeKind.Folder, "Reading the list of logs…"));
+        _servicesFolder = new LogNode(LogNodeKind.Folder, Loc.Get("Tree_Services"));
+        _servicesFolder.Children.Add(new LogNode(LogNodeKind.Folder, Loc.Get("Tree_Loading")));
         _roots.Add(_servicesFolder);
     }
 
@@ -142,7 +266,7 @@ public sealed partial class MainWindow : Window
                 if (task.IsFaulted)
                 {
                     _servicesFolder.Children.Clear();
-                    ShowProblem(task.Exception?.InnerException?.Message ?? "Windows could not list the logs.", offerAdmin: false);
+                    ShowProblem(task.Exception?.InnerException?.Message ?? CoreText.Get("Error_ListLogs"), offerAdmin: false);
                     return;
                 }
                 _channelInfos = task.Result;
@@ -245,7 +369,7 @@ public sealed partial class MainWindow : Window
         LogSource source = LogSource.ForFile(path);
         if (_filesFolder is null)
         {
-            _filesFolder = new LogNode(LogNodeKind.Folder, "Saved logs") { IsExpanded = true };
+            _filesFolder = new LogNode(LogNodeKind.Folder, Loc.Get("Tree_SavedLogs")) { IsExpanded = true };
             _roots.Add(_filesFolder);
         }
         if (!_filesFolder.Children.Any(n => string.Equals(n.Path, source.Path, StringComparison.OrdinalIgnoreCase)))
@@ -284,7 +408,7 @@ public sealed partial class MainWindow : Window
         _recordsLoading = true;
         _messagesLoading = true;
         _loadWatch.Restart();
-        LogTitle.Text = source.Kind == LogSourceKind.File ? $"{source.DisplayName} (saved file)" : source.DisplayName;
+        LogTitle.Text = source.Kind == LogSourceKind.File ? Loc.F("Title_SavedFile", source.DisplayName) : source.DisplayName;
         Title = $"{source.DisplayName} - Nax Event Viewer";
         SaveEvtxItem.IsEnabled = source.SupportsEvtxExport;
         LiveToggle.IsEnabled = source.SupportsLiveUpdates;
@@ -339,9 +463,9 @@ public sealed partial class MainWindow : Window
         _resumeBookmark = summary.NewestBookmark;
         RequestRebuild(keepScroll: true);
         if (summary.LeftOut.Count > 0)
-            ShowProblem($"Windows only lets administrators read {string.Join(", ", summary.LeftOut)}, so {(summary.LeftOut.Count == 1 ? "that log is" : "those logs are")} not included.", offerAdmin: !_isElevated);
+            ShowProblem(Loc.F(summary.LeftOut.Count == 1 ? "Problem_LeftOutOne" : "Problem_LeftOutMany", string.Join(", ", summary.LeftOut)), offerAdmin: !_isElevated);
         else if (summary.AccessDenied)
-            ShowProblem($"Windows only lets administrators read {_source?.DisplayName}.", offerAdmin: !_isElevated);
+            ShowProblem(Loc.F("Problem_AdminOnly", _source?.DisplayName), offerAdmin: !_isElevated);
         else if (summary.Problems.Count > 0)
             ShowProblem(string.Join(" ", summary.Problems.Distinct().Take(3)), offerAdmin: false);
 
@@ -411,12 +535,12 @@ public sealed partial class MainWindow : Window
             _live = subscription;
             // Without a bookmark, only events written from now on arrive, so say that a few may be missing.
             if (_resumeBookmark is null && _all.Count > 0 && !ProblemBar.IsOpen)
-                ShowProblem("Live updates show new events from now on. Events written while the log was read may be missing until you press F5.", offerAdmin: false);
+                ShowProblem(Loc.Get("Problem_LiveFromNow"), offerAdmin: false);
         }
         catch (EventLogException ex)
         {
             // An earlier problem, such as a read error, explains more than the failed subscription does.
-            if (!ProblemBar.IsOpen) ShowProblem(ex.Message + " Press F5 to read the log again.", offerAdmin: false);
+            if (!ProblemBar.IsOpen) ShowProblem(Loc.F("Problem_PressF5", ex.Message), offerAdmin: false);
         }
     }
 
@@ -456,7 +580,7 @@ public sealed partial class MainWindow : Window
         _live?.Dispose();
         _resumeBookmark = _live?.ResumeBookmark ?? _resumeBookmark;
         _live = null;
-        ShowProblem(message + " Press F5 to read the log again.", offerAdmin: false);
+        ShowProblem(Loc.F("Problem_PressF5", message), offerAdmin: false);
         UpdateStatus();
     }
 
@@ -526,7 +650,7 @@ public sealed partial class MainWindow : Window
                 Content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { icon, label } },
                 Tag = label,
             };
-            ToolTipService.SetToolTip(button, $"Show or hide {EventItem.KindText(kind).ToLowerInvariant()} events");
+            ToolTipService.SetToolTip(button, Loc.F("Level_ToolTip", EventItem.KindText(kind)));
             button.Click += (_, _) =>
             {
                 ApplyFilter();
@@ -571,8 +695,8 @@ public sealed partial class MainWindow : Window
         _idsInvalid = !idsValid;
         if (!idsValid) ids = EventIdFilter.Nothing;
         ToolTipService.SetToolTip(EventIdBox, idsValid
-            ? "IDs and ranges separated by commas, such as 4624, 1000-1010. A minus sign excludes an ID."
-            : "This is not a valid list of event IDs, so no events are shown. Use IDs and ranges separated by commas, such as 4624, 1000-1010, -7036.");
+            ? Loc.Get("EventIds_ToolTip")
+            : Loc.Get("EventIds_Invalid"));
         if (idsValid) EventIdBox.ClearValue(Control.BorderBrushProperty);
         else EventIdBox.BorderBrush = LevelVisuals.Brush(EventLevelKind.Error);
 
@@ -603,11 +727,11 @@ public sealed partial class MainWindow : Window
     {
         (Button Button, SortColumn Column, string Text)[] headers =
         [
-            (LevelHeader, SortColumn.Level, "Level"),
-            (TimeHeader, SortColumn.Time, "Date and time"),
-            (SourceHeader, SortColumn.Source, "Source"),
+            (LevelHeader, SortColumn.Level, Loc.Get("Column_Level")),
+            (TimeHeader, SortColumn.Time, Loc.Get("Column_Time")),
+            (SourceHeader, SortColumn.Source, Loc.Get("Column_Source")),
             (EventIdHeader, SortColumn.EventId, "ID"),
-            (TaskHeader, SortColumn.Task, "Task category"),
+            (TaskHeader, SortColumn.Task, Loc.Get("Column_Task")),
         ];
         foreach (var (button, column, text) in headers)
             button.Content = column == _comparer.Column ? text + (_comparer.Descending ? "  ↓" : "  ↑") : text;
@@ -653,7 +777,7 @@ public sealed partial class MainWindow : Window
         catch (Exception ex)
         {
             CrashLog.Write(ex);
-            ShowProblem($"The list could not be updated. {ex.Message}", offerAdmin: false);
+            ShowProblem(Loc.F("Problem_ListFailed", ex.Message), offerAdmin: false);
         }
         finally
         {
@@ -730,14 +854,14 @@ public sealed partial class MainWindow : Window
         bool unreadable = _summary is { Count: 0 } summary
             && (summary.Problems.Count > 0 || summary.NoLogReadable || (summary.AccessDenied && !someLeftOut));
         EmptyText.Text = _all.Count > 0
-                ? _idsInvalid ? "The event ID list is not valid, so no events are shown. Use IDs and ranges such as 4624, 1000-1010." : "No events match the filter."
-            : _summary is { NoLogReadable: true } ? "None of these logs could be opened."
-            : unreadable ? "This log could not be read. The message above says why."
+                ? _idsInvalid ? Loc.Get("Empty_IdsInvalid") : Loc.Get("Empty_NoMatch")
+            : _summary is { NoLogReadable: true } ? Loc.Get("Empty_NoneOpened")
+            : unreadable ? Loc.Get("Empty_Unreadable")
             : _source?.Kind == LogSourceKind.ProblemsOverview
                 ? someLeftOut
-                    ? "The logs that could be read had no critical events, errors or warnings in the last 24 hours."
-                    : "No log had critical events, errors or warnings in the last 24 hours."
-                : "This log has no events.";
+                    ? Loc.Get("Empty_OverviewSomeRead")
+                    : Loc.Get("Empty_OverviewNone")
+                : Loc.Get("Empty_NoEvents");
         EmptyText.Visibility = shown.Count == 0 && !_recordsLoading ? Visibility.Visible : Visibility.Collapsed;
         UpdateStatus();
     }
@@ -760,23 +884,22 @@ public sealed partial class MainWindow : Window
         var status = new StringBuilder();
         if (_recordsLoading)
         {
-            status.Append("Reading ").Append(_source?.DisplayName).Append("… ").Append(count(_all.Count)).Append(" events so far.");
+            status.Append(Loc.F("Status_Reading", _source?.DisplayName, count(_all.Count)));
         }
         else
         {
-            status.Append("Showing ").Append(count(_view.Count)).Append(" of ").Append(count(_all.Count)).Append(" events. ");
-            status.Append("Read in ").Append(_recordsElapsed.TotalSeconds.ToString("0.00", CultureInfo.CurrentCulture)).Append(" s.");
-            if (_live is not null) status.Append(" Watching for new events.");
+            status.Append(Loc.F("Status_Showing", count(_view.Count), count(_all.Count))).Append(' ');
+            status.Append(Loc.F("Status_ReadIn", _recordsElapsed.TotalSeconds.ToString("0.00", CultureInfo.CurrentCulture)));
+            if (_live is not null) status.Append(' ').Append(Loc.Get("Status_Watching"));
             if (_missingMessages > 0 && !_messagesLoading)
-                status.Append(' ').Append(count(_missingMessages)).Append(_missingMessages == 1 ? " event has" : " events have")
-                    .Append(" no message, so a search cannot find words in their message.");
+                status.Append(' ').Append(Loc.F(_missingMessages == 1 ? "Status_NoMessageOne" : "Status_NoMessageMany", count(_missingMessages)));
         }
         StatusText.Text = status.ToString();
 
         if (_messagesLoading && !_recordsLoading && _all.Count > 0)
         {
             int percent = (int)Math.Min(100, _messagesFormatted * 100L / Math.Max(1, _all.Count));
-            MessageStatusText.Text = $"Loading messages {percent} %";
+            MessageStatusText.Text = Loc.F("Status_LoadingMessages", percent);
             LoadProgress.IsIndeterminate = false;
             LoadProgress.Value = percent;
         }
@@ -805,16 +928,16 @@ public sealed partial class MainWindow : Window
         DetailPanel.Visibility = item is null ? Visibility.Collapsed : Visibility.Visible;
         DetailEmptyText.Visibility = item is null ? Visibility.Visible : Visibility.Collapsed;
         DetailEmptyText.Text = EventList.SelectedItems.Count > 1
-            ? $"{EventList.SelectedItems.Count.ToString("N0", CultureInfo.CurrentCulture)} events are selected. Press Ctrl+C to copy them."
-            : "Select an event to see its details.";
+            ? Loc.F("Detail_ManySelected", EventList.SelectedItems.Count.ToString("N0", CultureInfo.CurrentCulture))
+            : Loc.Get("Detail_SelectEvent");
         if (item is null || _source is not { } source) return;
 
         DetailIcon.Glyph = LevelVisuals.Glyph(item.Kind);
         DetailIcon.Foreground = LevelVisuals.Brush(item.Kind);
         DetailTitle.Text = $"{item.Provider} {item.EventId}";
         DetailSubtitle.Text = $"{item.LevelText}, {item.TimeText}";
-        MessageText.Text = item.Message ?? "Loading the message…";
-        XmlText.Text = "Loading…";
+        MessageText.Text = item.Message ?? Loc.Get("Detail_LoadingMessage");
+        XmlText.Text = Loc.Get("Detail_Loading");
         FillFields(item, null, null);
 
         EventDetail detail;
@@ -832,8 +955,8 @@ public sealed partial class MainWindow : Window
             // This is an async void handler, so an exception that escaped here would end the app.
             if (version != _detailVersion) return;
             CrashLog.Write(ex);
-            MessageText.Text = item.Message ?? $"The event could not be read again. {ex.Message}";
-            XmlText.Text = $"The event could not be read again. {ex.Message}";
+            MessageText.Text = item.Message ?? CoreText.F("Error_ReadAgain", ex.Message);
+            XmlText.Text = CoreText.F("Error_ReadAgain", ex.Message);
             return;
         }
         if (version != _detailVersion) return;
@@ -867,19 +990,19 @@ public sealed partial class MainWindow : Window
             FieldsGrid.Children.Add(text);
         }
 
-        Add("Log", item.Channel);
-        Add("Source", item.Provider);
-        Add("Event ID", item.EventIdText);
-        Add("Level", item.LevelText);
-        Add("Task category", detail?.TaskName ?? item.TaskName);
-        Add("Opcode", detail?.OpcodeName);
-        Add("Keywords", detail?.KeywordNames);
-        Add("Date and time", item.TimeText);
-        Add("User", user ?? item.UserSid ?? "N/A");
-        Add("Computer", item.Computer);
-        Add("Process ID", item.ProcessId == 0 ? null : item.ProcessId.ToString(CultureInfo.InvariantCulture));
-        Add("Thread ID", item.ThreadId == 0 ? null : item.ThreadId.ToString(CultureInfo.InvariantCulture));
-        Add("Record number", item.RecordId.ToString(CultureInfo.InvariantCulture));
+        Add(Loc.Get("Field_Log"), item.Channel);
+        Add(Loc.Get("Field_Source"), item.Provider);
+        Add(Loc.Get("Field_EventId"), item.EventIdText);
+        Add(Loc.Get("Field_Level"), item.LevelText);
+        Add(Loc.Get("Field_Task"), detail?.TaskName ?? item.TaskName);
+        Add(Loc.Get("Field_Opcode"), detail?.OpcodeName);
+        Add(Loc.Get("Field_Keywords"), detail?.KeywordNames);
+        Add(Loc.Get("Field_Time"), item.TimeText);
+        Add(Loc.Get("Field_User"), user ?? item.UserSid ?? Loc.Get("Field_NotAvailable"));
+        Add(Loc.Get("Field_Computer"), item.Computer);
+        Add(Loc.Get("Field_ProcessId"), item.ProcessId == 0 ? null : item.ProcessId.ToString(CultureInfo.InvariantCulture));
+        Add(Loc.Get("Field_ThreadId"), item.ThreadId == 0 ? null : item.ThreadId.ToString(CultureInfo.InvariantCulture));
+        Add(Loc.Get("Field_RecordNumber"), item.RecordId.ToString(CultureInfo.InvariantCulture));
     }
 
     /// <summary>Turns a SID into DOMAIN\Name. Lookups can be slow for domain accounts, so each SID is looked up once.</summary>
@@ -955,7 +1078,7 @@ public sealed partial class MainWindow : Window
         {
             // This is an async void handler, so an exception that escaped here would end the app.
             CrashLog.Write(ex);
-            ShowProblem($"The events could not be copied. {ex.Message}", offerAdmin: false);
+            ShowProblem(Loc.F("Problem_CopyFailed", ex.Message), offerAdmin: false);
         }
     }
 
@@ -984,7 +1107,7 @@ public sealed partial class MainWindow : Window
         catch (Exception ex)
         {
             // Another program can hold the clipboard open; that must not end this app.
-            ShowProblem($"The events could not be copied. {ex.Message}", offerAdmin: false);
+            ShowProblem(Loc.F("Problem_CopyFailed", ex.Message), offerAdmin: false);
         }
     }
 
@@ -1002,7 +1125,7 @@ public sealed partial class MainWindow : Window
         catch (Exception ex)
         {
             CrashLog.Write(ex);
-            ShowProblem($"The file could not be opened. {ex.Message}", offerAdmin: false);
+            ShowProblem(Loc.F("Problem_OpenFailed", ex.Message), offerAdmin: false);
         }
     }
 
@@ -1012,18 +1135,18 @@ public sealed partial class MainWindow : Window
         {
             if (_source is null) return;
             // While records are still arriving, the list is incomplete, and saving it would claim a complete file.
-            const string stillReading = "The log is still being read. Save it once every event has been read.";
+            string stillReading = Loc.Get("Save_StillReading");
             if (_recordsLoading)
             {
                 ShowProblem(stillReading, offerAdmin: false);
                 return;
             }
             int version = _loadVersion;
-            string path = await PickSavePath("CSV file", ".csv", "-events");
+            string path = await PickSavePath(Loc.Get("Save_CsvType"), ".csv", "-events");
             if (path.Length == 0) return;
             if (version != _loadVersion || _recordsLoading)
             {
-                ShowProblem(_recordsLoading ? stillReading : "Another log was opened while the save dialog was open, so nothing was saved.", offerAdmin: false);
+                ShowProblem(_recordsLoading ? stillReading : Loc.Get("Save_OtherLogOpened"), offerAdmin: false);
                 return;
             }
 
@@ -1037,14 +1160,14 @@ public sealed partial class MainWindow : Window
                 List<EventItem> items = EventView.FilterAndSort(snapshot, filter, comparer).Shown;
                 int missing = items.Count(i => !i.HasMessage);
                 int saved = EventExport.SaveCsv(path, items);
-                string note = missing > 0 ? $" {missing.ToString("N0", CultureInfo.CurrentCulture)} of them had no message loaded yet, so their message column is empty." : "";
-                return $"Saved {saved.ToString("N0", CultureInfo.CurrentCulture)} events to {path}.{note}";
+                string note = missing > 0 ? " " + Loc.F("Save_MissingNote", missing.ToString("N0", CultureInfo.CurrentCulture)) : "";
+                return Loc.F("Save_SavedCsv", saved.ToString("N0", CultureInfo.CurrentCulture), path) + note;
             });
         }
         catch (Exception ex)
         {
             CrashLog.Write(ex);
-            ShowProblem($"The file could not be saved. {ex.Message}", offerAdmin: false);
+            ShowProblem(Loc.F("Save_Failed", ex.Message), offerAdmin: false);
         }
     }
 
@@ -1053,18 +1176,18 @@ public sealed partial class MainWindow : Window
         try
         {
             if (_source is not { SupportsEvtxExport: true } source) return;
-            string path = await PickSavePath("Event log file", ".evtx", "");
+            string path = await PickSavePath(Loc.Get("Save_EvtxType"), ".evtx", "");
             if (path.Length == 0) return;
             await RunSave(() =>
             {
                 EventExport.SaveEvtx(source, path);
-                return $"Saved {path}.";
+                return Loc.F("Save_SavedFile", path);
             });
         }
         catch (Exception ex)
         {
             CrashLog.Write(ex);
-            ShowProblem($"The file could not be saved. {ex.Message}", offerAdmin: false);
+            ShowProblem(Loc.F("Save_Failed", ex.Message), offerAdmin: false);
         }
     }
 
@@ -1098,11 +1221,11 @@ public sealed partial class MainWindow : Window
         {
             if (ex is NothingToSaveException)
             {
-                ShowProblem($"Nothing was saved. {ex.Message}", offerAdmin: false);
+                ShowProblem(Loc.F("Save_Nothing", ex.Message), offerAdmin: false);
                 return;
             }
             if (ex is not (IOException or UnauthorizedAccessException or EventLogException)) CrashLog.Write(ex);
-            ShowProblem($"The file could not be saved. {ex.Message}", offerAdmin: false);
+            ShowProblem(Loc.F("Save_Failed", ex.Message), offerAdmin: false);
         }
     }
 
@@ -1118,7 +1241,7 @@ public sealed partial class MainWindow : Window
         string? executable = Environment.ProcessPath;
         if (executable is null) return;
         var start = new ProcessStartInfo(executable) { UseShellExecute = true, Verb = "runas" };
-        foreach (string argument in Program.ArgumentsFor(_source)) start.ArgumentList.Add(argument);
+        foreach (string argument in StartupArguments.For(_source)) start.ArgumentList.Add(argument);
         try
         {
             Process.Start(start);
@@ -1128,6 +1251,14 @@ public sealed partial class MainWindow : Window
             return; // The UAC prompt was cancelled; keep this window.
         }
         Close();
+    }
+
+    private void ShowInfo(string message)
+    {
+        ProblemBar.Severity = InfoBarSeverity.Success;
+        ProblemBar.Message = message;
+        ProblemAdminButton.Visibility = Visibility.Collapsed;
+        ProblemBar.IsOpen = true;
     }
 
     private void ShowProblem(string message, bool offerAdmin)

@@ -157,7 +157,7 @@ public static unsafe class EventReader
 
         nint evt = FindEvent(path, flags, item, out int error);
         if (evt == 0)
-            return new EventDetail(null, null, null, null, null, $"The event could not be read again. {new System.ComponentModel.Win32Exception(error).Message}");
+            return new EventDetail(null, null, null, null, null, CoreText.F("Error_ReadAgain", new System.ComponentModel.Win32Exception(error).Message));
         try
         {
             using var formatter = new MessageFormatter();
@@ -277,13 +277,13 @@ public static unsafe class EventReader
             query = Wevtapi.EvtQuery(0, part.Path, part.Query, part.Flags & ~Wevtapi.EvtQueryReverseDirection);
             if (query == 0)
             {
-                summary.AddProblem($"Windows could not open {part.Path ?? "the logs"}.", reverseError);
+                summary.AddProblem(CoreText.F("Error_Open", part.Path ?? CoreText.Get("Logs_Generic")), reverseError);
                 return;
             }
         }
         else if (query == 0)
         {
-            summary.AddProblem($"Windows could not open {part.Path ?? "the logs"}.", Marshal.GetLastPInvokeError());
+            summary.AddProblem(CoreText.F("Error_Open", part.Path ?? CoreText.Get("Logs_Generic")), Marshal.GetLastPInvokeError());
             return;
         }
 
@@ -299,7 +299,7 @@ public static unsafe class EventReader
                 if (!ok)
                 {
                     int error = Marshal.GetLastPInvokeError();
-                    if (error != Wevtapi.ErrorNoMoreItems) summary.AddProblem($"Reading {part.Path ?? "the logs"} stopped early.", error);
+                    if (error != Wevtapi.ErrorNoMoreItems) summary.AddProblem(CoreText.F("Error_ReadStopped", part.Path ?? CoreText.Get("Logs_Generic")), error);
                     break;
                 }
                 try

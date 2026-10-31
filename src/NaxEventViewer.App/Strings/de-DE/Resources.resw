@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <data name="Elevation_Administrator" xml:space="preserve"><value>Administrator</value></data>
+  <data name="Search_Placeholder" xml:space="preserve"><value>Meldungen, Quellen und IDs durchsuchen (Strg+F)</value></data>
+  <data name="EventIds_Placeholder" xml:space="preserve"><value>Ereignis-IDs, etwa 41, -7036</value></data>
+  <data name="EventIds_ToolTip" xml:space="preserve"><value>IDs und Bereiche durch Kommas getrennt, etwa 4624, 1000-1010. Ein Minuszeichen schließt eine ID aus.</value></data>
+  <data name="EventIds_Invalid" xml:space="preserve"><value>Dies ist keine gültige Liste von Ereignis-IDs, daher werden keine Ereignisse angezeigt. Geben Sie IDs und Bereiche durch Kommas getrennt ein, etwa 4624, 1000-1010, -7036.</value></data>
+  <data name="Time_Any" xml:space="preserve"><value>Beliebige Zeit</value></data>
+  <data name="Time_Hour" xml:space="preserve"><value>Letzte Stunde</value></data>
+  <data name="Time_Day" xml:space="preserve"><value>Letzte 24 Stunden</value></data>
+  <data name="Time_Week" xml:space="preserve"><value>Letzte 7 Tage</value></data>
+  <data name="Time_Month" xml:space="preserve"><value>Letzte 30 Tage</value></data>
+  <data name="Command_Refresh" xml:space="preserve"><value>Aktualisieren</value></data>
+  <data name="Command_RefreshTip" xml:space="preserve"><value>Protokoll erneut lesen (F5)</value></data>
+  <data name="Command_Live" xml:space="preserve"><value>Live</value></data>
+  <data name="Command_LiveTip" xml:space="preserve"><value>Neue Ereignisse anzeigen, sobald Windows sie schreibt</value></data>
+  <data name="Command_Open" xml:space="preserve"><value>Datei öffnen</value></data>
+  <data name="Command_OpenTip" xml:space="preserve"><value>Gespeicherte .evtx-Datei öffnen (Strg+O)</value></data>
+  <data name="Command_Save" xml:space="preserve"><value>Speichern</value></data>
+  <data name="Command_SaveCsv" xml:space="preserve"><value>Angezeigte Ereignisse als CSV…</value></data>
+  <data name="Command_SaveEvtx" xml:space="preserve"><value>Ganzes Protokoll als .evtx…</value></data>
+  <data name="Command_SaveCsvKey" xml:space="preserve"><value>Strg+S</value></data>
+  <data name="Command_Admin" xml:space="preserve"><value>Als Administrator ausführen</value></data>
+  <data name="Command_AdminTip" xml:space="preserve"><value>Mit Administratorrechten neu starten, die das Sicherheitsprotokoll und einige andere Protokolle benötigen</value></data>
+  <data name="Command_Settings" xml:space="preserve"><value>Einstellungen</value></data>
+  <data name="Settings_Language" xml:space="preserve"><value>Sprache</value></data>
+  <data name="Language_System" xml:space="preserve"><value>Wie Windows</value></data>
+  <data name="Language_English" xml:space="preserve"><value>English</value></data>
+  <data name="Language_German" xml:space="preserve"><value>Deutsch</value></data>
+  <data name="Settings_Replace" xml:space="preserve"><value>Windows-Ereignisanzeige ersetzen</value></data>
+  <data name="Replace_On" xml:space="preserve"><value>Windows öffnet jetzt Nax Event Viewer statt der Windows-Ereignisanzeige, wenn sie über das Win+X-Menü oder den Befehl eventvwr gestartet wird. Der Eintrag im Startmenü unter Windows-Tools öffnet weiterhin die Windows-Ereignisanzeige.</value></data>
+  <data name="Replace_Off" xml:space="preserve"><value>Die Windows-Ereignisanzeige öffnet sich wieder wie zuvor.</value></data>
+  <data name="Replace_Other" xml:space="preserve"><value>{0} ersetzt die Windows-Ereignisanzeige bereits. Schalten Sie das zuerst in diesem Programm aus.</value></data>
+  <data name="Replace_Cancelled" xml:space="preserve"><value>Die Administratorabfrage wurde abgebrochen, daher wurde nichts geändert.</value></data>
+  <data name="Replace_Failed" xml:space="preserve"><value>Die Einstellung konnte nicht geändert werden. {0}</value></data>
+  <data name="Replace_ExitCode" xml:space="preserve"><value>Die Einstellung konnte nicht geändert werden. Das Hilfsprogramm endete mit dem Code {0}.</value></data>
+  <data name="Problem_RestartAdmin" xml:space="preserve"><value>Als Administrator neu starten</value></data>
+  <data name="Problem_LeftOutOne" xml:space="preserve"><value>Windows erlaubt nur Administratoren, {0} zu lesen, daher ist dieses Protokoll nicht enthalten.</value></data>
+  <data name="Problem_LeftOutMany" xml:space="preserve"><value>Windows erlaubt nur Administratoren, {0} zu lesen, daher sind diese Protokolle nicht enthalten.</value></data>
+  <data name="Problem_AdminOnly" xml:space="preserve"><value>Windows erlaubt nur Administratoren, {0} zu lesen.</value></data>
+  <data name="Problem_LiveFromNow" xml:space="preserve"><value>Die Liveanzeige zeigt neue Ereignisse ab jetzt. Ereignisse, die während des Lesens geschrieben wurden, fehlen möglicherweise, bis Sie F5 drücken.</value></data>
+  <data name="Problem_PressF5" xml:space="preserve"><value>{0} Drücken Sie F5, um das Protokoll erneut zu lesen.</value></data>
+  <data name="Problem_ListFailed" xml:space="preserve"><value>Die Liste konnte nicht aktualisiert werden. {0}</value></data>
+  <data name="Problem_CopyFailed" xml:space="preserve"><value>Die Ereignisse konnten nicht kopiert werden. {0}</value></data>
+  <data name="Problem_OpenFailed" xml:space="preserve"><value>Die Datei konnte nicht geöffnet werden. {0}</value></data>
+  <data name="Tree_Overview" xml:space="preserve"><value>Probleme in allen Protokollen (24 h)</value></data>
+  <data name="Tree_WindowsLogs" xml:space="preserve"><value>Windows-Protokolle</value></data>
+  <data name="Tree_Services" xml:space="preserve"><value>Anwendungs- und Dienstprotokolle</value></data>
+  <data name="Tree_Loading" xml:space="preserve"><value>Liste der Protokolle wird gelesen…</value></data>
+  <data name="Tree_SavedLogs" xml:space="preserve"><value>Gespeicherte Protokolle</value></data>
+  <data name="Tree_ShowAll" xml:space="preserve"><value>Leere, Analyse- und Debugprotokolle anzeigen</value></data>
+  <data name="Title_SavedFile" xml:space="preserve"><value>{0} (gespeicherte Datei)</value></data>
+  <data name="Level_ToolTip" xml:space="preserve"><value>Ereignisse der Ebene „{0}“ ein- oder ausblenden</value></data>
+  <data name="Column_Level" xml:space="preserve"><value>Ebene</value></data>
+  <data name="Column_Time" xml:space="preserve"><value>Datum und Uhrzeit</value></data>
+  <data name="Column_Source" xml:space="preserve"><value>Quelle</value></data>
+  <data name="Column_EventId" xml:space="preserve"><value>ID</value></data>
+  <data name="Column_Task" xml:space="preserve"><value>Aufgabenkategorie</value></data>
+  <data name="Column_Message" xml:space="preserve"><value>Meldung</value></data>
+  <data name="Empty_IdsInvalid" xml:space="preserve"><value>Die Liste der Ereignis-IDs ist ungültig, daher werden keine Ereignisse angezeigt. Geben Sie IDs und Bereiche wie 4624, 1000-1010 ein.</value></data>
+  <data name="Empty_NoMatch" xml:space="preserve"><value>Kein Ereignis entspricht dem Filter.</value></data>
+  <data name="Empty_NoneOpened" xml:space="preserve"><value>Keines dieser Protokolle konnte geöffnet werden.</value></data>
+  <data name="Empty_Unreadable" xml:space="preserve"><value>Dieses Protokoll konnte nicht gelesen werden. Die Meldung oben nennt den Grund.</value></data>
+  <data name="Empty_OverviewSomeRead" xml:space="preserve"><value>Die lesbaren Protokolle hatten in den letzten 24 Stunden keine kritischen Ereignisse, Fehler oder Warnungen.</value></data>
+  <data name="Empty_OverviewNone" xml:space="preserve"><value>Kein Protokoll hatte in den letzten 24 Stunden kritische Ereignisse, Fehler oder Warnungen.</value></data>
+  <data name="Empty_NoEvents" xml:space="preserve"><value>Dieses Protokoll enthält keine Ereignisse.</value></data>
+  <data name="Status_Reading" xml:space="preserve"><value>{0} wird gelesen… bisher {1} Ereignisse.</value></data>
+  <data name="Status_Showing" xml:space="preserve"><value>{0} von {1} Ereignissen werden angezeigt.</value></data>
+  <data name="Status_ReadIn" xml:space="preserve"><value>Gelesen in {0} s.</value></data>
+  <data name="Status_Watching" xml:space="preserve"><value>Neue Ereignisse werden überwacht.</value></data>
+  <data name="Status_NoMessageOne" xml:space="preserve"><value>{0} Ereignis hat keine Meldung, daher findet die Suche keine Wörter in seiner Meldung.</value></data>
+  <data name="Status_NoMessageMany" xml:space="preserve"><value>{0} Ereignisse haben keine Meldung, daher findet die Suche keine Wörter in ihren Meldungen.</value></data>
+  <data name="Status_LoadingMessages" xml:space="preserve"><value>Meldungen werden geladen: {0} %</value></data>
+  <data name="Detail_ManySelected" xml:space="preserve"><value>{0} Ereignisse sind ausgewählt. Drücken Sie Strg+C, um sie zu kopieren.</value></data>
+  <data name="Detail_SelectEvent" xml:space="preserve"><value>Wählen Sie ein Ereignis aus, um seine Details zu sehen.</value></data>
+  <data name="Detail_LoadingMessage" xml:space="preserve"><value>Meldung wird geladen…</value></data>
+  <data name="Detail_Loading" xml:space="preserve"><value>Wird geladen…</value></data>
+  <data name="Detail_General" xml:space="preserve"><value>Allgemein</value></data>
+  <data name="Detail_Xml" xml:space="preserve"><value>XML</value></data>
+  <data name="Detail_CopyTip" xml:space="preserve"><value>Ereignis als Text kopieren</value></data>
+  <data name="Field_Log" xml:space="preserve"><value>Protokoll</value></data>
+  <data name="Field_Source" xml:space="preserve"><value>Quelle</value></data>
+  <data name="Field_EventId" xml:space="preserve"><value>Ereignis-ID</value></data>
+  <data name="Field_Level" xml:space="preserve"><value>Ebene</value></data>
+  <data name="Field_Task" xml:space="preserve"><value>Aufgabenkategorie</value></data>
+  <data name="Field_Opcode" xml:space="preserve"><value>Opcode</value></data>
+  <data name="Field_Keywords" xml:space="preserve"><value>Schlüsselwörter</value></data>
+  <data name="Field_Time" xml:space="preserve"><value>Datum und Uhrzeit</value></data>
+  <data name="Field_User" xml:space="preserve"><value>Benutzer</value></data>
+  <data name="Field_NotAvailable" xml:space="preserve"><value>Nicht zutreffend</value></data>
+  <data name="Field_Computer" xml:space="preserve"><value>Computer</value></data>
+  <data name="Field_ProcessId" xml:space="preserve"><value>Prozess-ID</value></data>
+  <data name="Field_ThreadId" xml:space="preserve"><value>Thread-ID</value></data>
+  <data name="Field_RecordNumber" xml:space="preserve"><value>Datensatznummer</value></data>
+  <data name="Save_StillReading" xml:space="preserve"><value>Das Protokoll wird noch gelesen. Speichern Sie es, sobald alle Ereignisse gelesen sind.</value></data>
+  <data name="Save_OtherLogOpened" xml:space="preserve"><value>Während der Speichern-Dialog offen war, wurde ein anderes Protokoll geöffnet, daher wurde nichts gespeichert.</value></data>
+  <data name="Save_CsvType" xml:space="preserve"><value>CSV-Datei</value></data>
+  <data name="Save_EvtxType" xml:space="preserve"><value>Ereignisprotokolldatei</value></data>
+  <data name="Save_MissingNote" xml:space="preserve"><value>Bei {0} davon war noch keine Meldung geladen, daher ist ihre Meldungsspalte leer.</value></data>
+  <data name="Save_SavedCsv" xml:space="preserve"><value>{0} Ereignisse wurden in {1} gespeichert.</value></data>
+  <data name="Save_SavedFile" xml:space="preserve"><value>{0} wurde gespeichert.</value></data>
+  <data name="Save_Failed" xml:space="preserve"><value>Die Datei konnte nicht gespeichert werden. {0}</value></data>
+  <data name="Save_Nothing" xml:space="preserve"><value>Es wurde nichts gespeichert. {0}</value></data>
+</root>

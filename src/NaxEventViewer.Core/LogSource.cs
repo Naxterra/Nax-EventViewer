@@ -57,7 +57,7 @@ public sealed class LogSource
         new(LogSourceKind.File, System.IO.Path.GetFullPath(filePath), System.IO.Path.GetFileName(filePath), [], TimeSpan.Zero);
 
     public static LogSource ForProblemsOverview(IReadOnlyList<string> channels, TimeSpan window) =>
-        new(LogSourceKind.ProblemsOverview, "", "Problems in all logs", channels.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), window);
+        new(LogSourceKind.ProblemsOverview, "", CoreText.Get("Overview_Name"), channels.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), window);
 
     /// <summary>The queries that read every event of this source, newest first where the log allows it.</summary>
     internal IReadOnlyList<QueryPart> Parts()

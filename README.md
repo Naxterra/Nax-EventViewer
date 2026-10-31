@@ -17,6 +17,8 @@ Filtering and sorting run on the events in memory, so changing a filter is insta
 - A detail pane with the full message, all fields, the user account and the event XML.
 - Saved .evtx files can be opened, the shown events can be saved as CSV, and a whole log can be saved as .evtx. In a CSV file, event text that would start a spreadsheet formula, at the start of a cell or after a semicolon, tab or line break, gets an apostrophe in front, so opening the file in Excel never runs it.
 - Ctrl+C copies the selected events. F5 reads the log again.
+- The interface is in English and German. It follows the Windows display language, and Settings > Language can choose one.
+- Settings > Replace Windows Event Viewer makes Windows open Nax Event Viewer in place of the Windows Event Viewer, from the Win+X menu and the `eventvwr` command. The Start menu entry under Windows Tools opens `eventvwr.msc` in the Microsoft Management Console and keeps opening the Windows Event Viewer. The option needs an installation for all users and asks once for administrator rights, and turning it off or uninstalling the app restores the Windows Event Viewer.
 
 The Security log and a few others can only be read by administrators. The app runs without administrator rights and offers to restart with them when a log needs it.
 

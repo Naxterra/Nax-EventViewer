@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <data name="Level_Critical" xml:space="preserve"><value>Kritisch</value></data>
+  <data name="Level_Error" xml:space="preserve"><value>Fehler</value></data>
+  <data name="Level_Warning" xml:space="preserve"><value>Warnung</value></data>
+  <data name="Level_Information" xml:space="preserve"><value>Informationen</value></data>
+  <data name="Level_Verbose" xml:space="preserve"><value>Ausführlich</value></data>
+  <data name="Level_AuditSuccess" xml:space="preserve"><value>Überwachung erfolgreich</value></data>
+  <data name="Level_AuditFailure" xml:space="preserve"><value>Überwachung gescheitert</value></data>
+  <data name="Task_None" xml:space="preserve"><value>Keine</value></data>
+  <data name="Overview_Name" xml:space="preserve"><value>Probleme in allen Protokollen</value></data>
+  <data name="Csv_Header" xml:space="preserve"><value>Ebene,Datum und Uhrzeit,Datum und Uhrzeit (UTC),Quelle,Ereignis-ID,Aufgabenkategorie,Protokoll,Computer,Datensatznummer,Meldung</value></data>
+  <data name="Logs_Generic" xml:space="preserve"><value>die Protokolle</value></data>
+  <data name="Error_ListLogs" xml:space="preserve"><value>Windows konnte die Protokolle nicht auflisten.</value></data>
+  <data name="Error_ListingStopped" xml:space="preserve"><value>Windows hat die Liste der Protokolle nach {0} abgebrochen. {1}</value></data>
+  <data name="Error_EvtxSingleOnly" xml:space="preserve"><value>Nur ein einzelnes Protokoll oder eine einzelne Datei kann als .evtx gespeichert werden.</value></data>
+  <data name="Error_Save" xml:space="preserve"><value>Windows konnte {0} nicht speichern.</value></data>
+  <data name="Error_NothingToSave" xml:space="preserve"><value>Die Liste enthält keine Ereignisse zum Speichern.</value></data>
+  <data name="Error_ReadAgain" xml:space="preserve"><value>Das Ereignis konnte nicht erneut gelesen werden. {0}</value></data>
+  <data name="Error_Open" xml:space="preserve"><value>Windows konnte {0} nicht öffnen.</value></data>
+  <data name="Error_ReadStopped" xml:space="preserve"><value>Das Lesen von {0} wurde vorzeitig beendet.</value></data>
+  <data name="Error_Unexpected" xml:space="preserve"><value>Das Lesen wurde wegen eines unerwarteten Fehlers vorzeitig beendet. {0}</value></data>
+  <data name="Error_PrepareRead" xml:space="preserve"><value>Windows konnte das Lesen von Ereignissen nicht vorbereiten.</value></data>
+  <data name="Error_ContinueWatching" xml:space="preserve"><value>Windows konnte die Überwachung von {0} nicht dort fortsetzen, wo sie aufgehört hat.</value></data>
+  <data name="Error_Watch" xml:space="preserve"><value>Windows konnte {0} nicht auf neue Ereignisse überwachen.</value></data>
+  <data name="Live_Stopped" xml:space="preserve"><value>Die Liveanzeige für {0} wurde beendet. {1}</value></data>
+  <data name="Message_NoText" xml:space="preserve"><value>Windows hat keinen Meldungstext für das Ereignis {0} von {1}.</value></data>
+  <data name="Message_UnnamedSource" xml:space="preserve"><value>einer unbenannten Quelle</value></data>
+  <data name="Message_DataFollows" xml:space="preserve"><value>Das Ereignis enthält diese Daten:</value></data>
+  <data name="Replace_NeedsMachineInstall" xml:space="preserve"><value>Die Windows-Ereignisanzeige kann nur durch eine Kopie ersetzt werden, die für alle Benutzer in einem Ordner installiert ist, den nur Administratoren ändern können.</value></data>
+</root>

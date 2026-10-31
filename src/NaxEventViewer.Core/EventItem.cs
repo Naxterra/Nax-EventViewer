@@ -105,20 +105,20 @@ public sealed class EventItem : INotifyPropertyChanged
     }
 
     /// <summary>The task category name, or the task number when the provider gives no name.</summary>
-    public string TaskName => _taskName ?? (Task == 0 ? "None" : Task.ToString(CultureInfo.InvariantCulture));
+    public string TaskName => _taskName ?? (Task == 0 ? CoreText.Get("Task_None") : Task.ToString(CultureInfo.InvariantCulture));
 
     public bool HasMessage => _plainMessage is not null || Volatile.Read(ref _lines) is not null;
 
-    public static string KindText(EventLevelKind kind) => kind switch
+    public static string KindText(EventLevelKind kind) => CoreText.Get(kind switch
     {
-        EventLevelKind.Critical => "Critical",
-        EventLevelKind.Error => "Error",
-        EventLevelKind.Warning => "Warning",
-        EventLevelKind.Verbose => "Verbose",
-        EventLevelKind.AuditSuccess => "Audit Success",
-        EventLevelKind.AuditFailure => "Audit Failure",
-        _ => "Information",
-    };
+        EventLevelKind.Critical => "Level_Critical",
+        EventLevelKind.Error => "Level_Error",
+        EventLevelKind.Warning => "Level_Warning",
+        EventLevelKind.Verbose => "Level_Verbose",
+        EventLevelKind.AuditSuccess => "Level_AuditSuccess",
+        EventLevelKind.AuditFailure => "Level_AuditFailure",
+        _ => "Level_Information",
+    });
 
     /// <summary>Stores a message formatted on its own, such as by the detail pane. Call this on the UI thread once the item is visible.</summary>
     public void SetFormatted(string message, string? taskName)
