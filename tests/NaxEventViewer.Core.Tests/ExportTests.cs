@@ -65,6 +65,83 @@ internal static class ExportTests
                 Check.Equal(1, Directory.GetFiles(folder).Length);
             });
 
+        yield return ("atomic_save_without_overwrite_preserves_a_target_created_during_writing",
+            "If another program creates the backup target while its temporary file is being written, the save fails, preserves that program's file and removes the partial file.",
+            () =>
+            {
+                string folder = Fixtures.TempFolder("backup-race");
+                string path = Path.Combine(folder, "copy.evtx");
+                try
+                {
+                    AtomicFile.Write(path, stream =>
+                    {
+                        stream.WriteByte(42);
+                        File.WriteAllText(path, "another backup");
+                    }, overwrite: false);
+                    throw new Exception("the save must refuse the file created during writing");
+                }
+                catch (IOException)
+                {
+                }
+                Check.Equal("another backup", File.ReadAllText(path));
+                Check.Equal(1, Directory.GetFiles(folder).Length);
+            });
+
+        yield return ("clear_backup_collision_keeps_and_reports_the_only_copy",
+            "If a folder backup target already exists after a log was cleared, it stays unchanged and the complete local copy is kept with its location in the reported error.",
+            () =>
+            {
+                string folder = Fixtures.TempFolder("backup-collision");
+                string localCopy = Path.Combine(folder, "local.evtx");
+                string target = Path.Combine(folder, "chosen.evtx");
+                File.WriteAllText(localCopy, "cleared events");
+                File.WriteAllText(target, "existing backup");
+                try
+                {
+                    LogCleaner.SaveBackup("Test", localCopy, target, overwriteBackup: false);
+                    throw new Exception("a backup collision must be reported");
+                }
+                catch (BackupNotSavedException ex)
+                {
+                    Check.Equal(localCopy, ex.KeptAt);
+                    Check.That(ex.Message.Contains(localCopy), "the error must name the recovery copy");
+                    Check.That(ex.InnerException is IOException, "the collision must be the reason for keeping the copy");
+                }
+                Check.Equal("cleared events", File.ReadAllText(localCopy));
+                Check.Equal("existing backup", File.ReadAllText(target));
+                Check.Equal(2, Directory.GetFiles(folder).Length);
+            });
+
+        yield return ("clear_backup_to_a_new_target_saves_the_whole_copy",
+            "Saving a cleared log's local copy to a new folder backup path preserves all its bytes, removes the local copy only after success and leaves no partial file.",
+            () =>
+            {
+                string folder = Fixtures.TempFolder("backup-new");
+                string localCopy = Path.Combine(folder, "local.evtx");
+                string target = Path.Combine(folder, "chosen.evtx");
+                byte[] content = Enumerable.Range(0, 200_000).Select(i => (byte)i).ToArray();
+                File.WriteAllBytes(localCopy, content);
+                LogCleaner.SaveBackup("Test", localCopy, target, overwriteBackup: false);
+                Check.That(content.AsSpan().SequenceEqual(File.ReadAllBytes(target)), "the whole backup must be saved");
+                Check.That(!File.Exists(localCopy), "the local copy is removed after success");
+                Check.Equal(1, Directory.GetFiles(folder).Length);
+            });
+
+        yield return ("clear_backup_with_confirmed_overwrite_replaces_the_target",
+            "A single-log backup for which replacement was confirmed still replaces the chosen file with the cleared events and removes the local copy after success.",
+            () =>
+            {
+                string folder = Fixtures.TempFolder("backup-replace");
+                string localCopy = Path.Combine(folder, "local.evtx");
+                string target = Path.Combine(folder, "chosen.evtx");
+                File.WriteAllText(localCopy, "cleared events");
+                File.WriteAllText(target, "old backup");
+                LogCleaner.SaveBackup("Test", localCopy, target, overwriteBackup: true);
+                Check.Equal("cleared events", File.ReadAllText(target));
+                Check.That(!File.Exists(localCopy), "the local copy is removed after success");
+                Check.Equal(1, Directory.GetFiles(folder).Length);
+            });
+
         yield return ("csv_temporary_file_is_hidden_while_written_and_final_file_is_not",
             "While a CSV file is being written, its temporary file in the target folder is hidden, and the finished file is a normal visible file.",
             () =>

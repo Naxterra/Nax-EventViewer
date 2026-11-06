@@ -134,6 +134,8 @@ public static unsafe class EventReader
                 {
                     EventItem? rendered = renderer.Render(handles[i], part.Path);
                     if (rendered is null || !byKey.TryGetValue(rendered.Key, out EventItem? item) || item.HasMessage) continue;
+                    // A log cleared or a file replaced between passes can reuse record numbers for different events.
+                    if (!IsSameEvent(rendered, item)) continue;
                     pending.Add(new FormattedMessage(item, store.Add(formatter.FormatMessage(handles[i], item)), formatter.FormatTask(handles[i], item)));
                     if (pending.Count >= MessageBatchSize)
                     {

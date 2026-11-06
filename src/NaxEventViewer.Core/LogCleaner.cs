@@ -17,7 +17,7 @@ public static class LogCleaner
     /// nothing was cleared, and <see cref="BackupNotSavedException"/> when the log was cleared but the copy could not be
     /// put at the chosen path; the copy is then kept in the temporary folder.
     /// </summary>
-    public static void Clear(string channel, string? backupPath)
+    public static void Clear(string channel, string? backupPath, bool overwriteBackup = true)
     {
         if (backupPath is null)
         {
@@ -33,13 +33,19 @@ public static class LogCleaner
             AtomicFile.TryDelete(localCopy);
             throw error;
         }
+        SaveBackup(channel, localCopy, backupPath, overwriteBackup);
+    }
+
+    /// <summary>Moves a cleared log's only copy to its destination, keeping and naming it if saving fails.</summary>
+    internal static void SaveBackup(string channel, string localCopy, string backupPath, bool overwriteBackup)
+    {
         try
         {
             AtomicFile.Write(backupPath, output =>
             {
                 using var input = new FileStream(localCopy, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16);
                 input.CopyTo(output, 1 << 20);
-            });
+            }, overwrite: overwriteBackup);
         }
         catch (Exception ex)
         {

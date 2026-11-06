@@ -1522,7 +1522,9 @@ public sealed partial class MainWindow : Window
             {
                 try
                 {
-                    LogCleaner.Clear(log.Path, backups[i]);
+                    // Folder names are generated without an overwrite prompt. A file created after BackupPaths ran
+                    // must stay intact; the cleared log's copy is kept locally and reported if that happens.
+                    LogCleaner.Clear(log.Path, backups[i], overwriteBackup: !request.IsFolder);
                     return null;
                 }
                 catch (Exception ex)

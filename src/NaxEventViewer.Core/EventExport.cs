@@ -138,8 +138,8 @@ internal static class AtomicFile
     internal const string TemporaryPrefix = ".nax-";
     private const string TemporaryMarker = ".partial";
 
-    /// <summary>Calls <paramref name="write"/> with a stream on a new hidden temporary file, then puts that file in place of the target.</summary>
-    public static void Write(string targetPath, Action<Stream> write)
+    /// <summary>Writes through a hidden temporary file, optionally refusing to replace a target that already exists.</summary>
+    public static void Write(string targetPath, Action<Stream> write, bool overwrite = true)
     {
         string fullPath = Path.GetFullPath(targetPath);
         string folder = Path.GetDirectoryName(fullPath) ?? throw new ArgumentException("The path has no folder.", nameof(targetPath));
@@ -153,7 +153,7 @@ internal static class AtomicFile
                 write(stream);
             }
             File.SetAttributes(temporaryPath, File.GetAttributes(temporaryPath) & ~FileAttributes.Hidden);
-            File.Move(temporaryPath, fullPath, overwrite: true);
+            File.Move(temporaryPath, fullPath, overwrite);
         }
         catch
         {

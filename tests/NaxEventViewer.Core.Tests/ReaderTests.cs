@@ -41,6 +41,23 @@ internal static class ReaderTests
                 Check.Equal(items.Count, seen.Count);
             });
 
+        yield return ("second_pass_rejects_reused_record_numbers",
+            "When a log is cleared or a saved file replaced between passes, a record with a different time or event ID never supplies the old event's message, while an unchanged event still gets its message.",
+            () =>
+            {
+                LogSource source = LogSource.ForFile(Fixtures.ApplicationLogFile);
+                List<EventItem> real = ReadAll(Fixtures.ApplicationLogFile, out _);
+                Check.That(real.Count >= 3, "the fixture needs three events");
+                EventItem otherTime = Copy(real[0], timeUtc: real[0].TimeCreatedUtc.AddSeconds(-1));
+                EventItem otherId = Copy(real[1], eventId: (ushort)(real[1].EventId ^ 1));
+                Check.Equal(real[0].Key, otherTime.Key);
+                Check.Equal(real[1].Key, otherId.Key);
+                var seen = new List<EventItem>();
+                EventReader.FormatMessages(source, [otherTime, otherId, real[2]], new MessageStore(),
+                    batch => seen.AddRange(batch.Select(message => message.Item)), CancellationToken.None);
+                Check.That(seen.SequenceEqual([real[2]]), "only the event whose identity still matches may get a message");
+            });
+
         yield return ("selected_event_is_found_again_by_record_number",
             "Selecting an event in the middle of a saved log finds that same event again and shows its XML with the right record number.",
             () =>
