@@ -47,8 +47,18 @@ public sealed class ReadSummary
     internal void AddProblem(string text) => _problems.Add(text);
 }
 
+/// <summary>One structured field from an event's EventData or UserData section.</summary>
+public readonly record struct EventDataField(string Name, string Value);
+
 /// <summary>The parts of an event that are only read when the user selects it.</summary>
-public sealed record EventDetail(string? Xml, string? Message, string? TaskName, string? OpcodeName, string? KeywordNames, string? Error);
+public sealed record EventDetail(
+    string? Xml,
+    string? Message,
+    string? TaskName,
+    string? OpcodeName,
+    string? KeywordNames,
+    string? Error,
+    IReadOnlyList<EventDataField>? Data = null);
 
 /// <summary>
 /// Reads events in two passes. The first pass reads only the System section of every event, which is fast, so the
@@ -119,12 +129,31 @@ public static unsafe class EventReader
     public static void FormatMessages(LogSource source, IReadOnlyList<EventItem> items, MessageStore store, Action<IReadOnlyList<FormattedMessage>> onBatch, CancellationToken cancellation)
     {
         var byKey = new Dictionary<EventKey, EventItem>(items.Count);
-        foreach (EventItem item in items) byKey.TryAdd(item.Key, item);
+        Dictionary<(EventKey Key, DateTime TimeUtc, ushort EventId), Queue<EventItem>>? duplicates = null;
+        HashSet<EventKey>? collidedKeys = null;
+        foreach (EventItem item in items)
+        {
+            if (collidedKeys is not null && collidedKeys.Contains(item.Key))
+            {
+                AddDuplicate(duplicates!, item);
+                continue;
+            }
+            if (byKey.TryAdd(item.Key, item)) continue;
+            // Analytic/debug logs (RecordId = 0) and merged .evtx files can hold multiple events with the same key.
+            // Sub-keying collisions by (EventKey, TimeCreatedUtc, EventId) keeps matching O(1) even with 50,000+ RecordId 0 events.
+            collidedKeys ??= [];
+            duplicates ??= new Dictionary<(EventKey, DateTime, ushort), Queue<EventItem>>();
+            collidedKeys.Add(item.Key);
+            EventItem existing = byKey[item.Key];
+            byKey.Remove(item.Key);
+            AddDuplicate(duplicates, existing);
+            AddDuplicate(duplicates, item);
+        }
 
         var summary = new ReadSummary();
         var strings = new StringPool();
         using var renderer = new SystemRenderer(strings);
-        using var formatter = new MessageFormatter();
+        using var formatter = new MessageFormatter(source.Kind == LogSourceKind.File ? source.Path : null);
         var pending = new List<FormattedMessage>(MessageBatchSize);
         foreach (QueryPart part in source.Parts())
         {
@@ -133,9 +162,9 @@ public static unsafe class EventReader
                 for (int i = 0; i < count && !cancellation.IsCancellationRequested; i++)
                 {
                     EventItem? rendered = renderer.Render(handles[i], part.Path);
-                    if (rendered is null || !byKey.TryGetValue(rendered.Key, out EventItem? item) || item.HasMessage) continue;
-                    // A log cleared or a file replaced between passes can reuse record numbers for different events.
-                    if (!IsSameEvent(rendered, item)) continue;
+                    if (rendered is null) continue;
+                    EventItem? item = MatchUnformatted(rendered, byKey, collidedKeys, duplicates);
+                    if (item is null) continue;
                     pending.Add(new FormattedMessage(item, store.Add(formatter.FormatMessage(handles[i], item)), formatter.FormatTask(handles[i], item)));
                     if (pending.Count >= MessageBatchSize)
                     {
@@ -147,6 +176,48 @@ public static unsafe class EventReader
             if (cancellation.IsCancellationRequested) return;
         }
         if (pending.Count > 0) onBatch(pending.ToArray());
+    }
+
+    private static void AddDuplicate(Dictionary<(EventKey Key, DateTime TimeUtc, ushort EventId), Queue<EventItem>> duplicates, EventItem item)
+    {
+        var subKey = (item.Key, item.TimeCreatedUtc, item.EventId);
+        if (!duplicates.TryGetValue(subKey, out Queue<EventItem>? queue))
+        {
+            queue = new Queue<EventItem>(2);
+            duplicates[subKey] = queue;
+        }
+        queue.Enqueue(item);
+    }
+
+    private static EventItem? MatchUnformatted(
+        EventItem rendered,
+        Dictionary<EventKey, EventItem> byKey,
+        HashSet<EventKey>? collidedKeys,
+        Dictionary<(EventKey Key, DateTime TimeUtc, ushort EventId), Queue<EventItem>>? duplicates)
+    {
+        if (collidedKeys is not null && collidedKeys.Contains(rendered.Key))
+        {
+            var subKey = (rendered.Key, rendered.TimeCreatedUtc, rendered.EventId);
+            if (!duplicates!.TryGetValue(subKey, out Queue<EventItem>? queue)) return null;
+            int remaining = queue.Count;
+            for (int i = 0; i < remaining; i++)
+            {
+                EventItem candidate = queue.Dequeue();
+                if (candidate.HasMessage) continue;
+                if (IsSameEvent(rendered, candidate))
+                {
+                    if (queue.Count == 0) duplicates.Remove(subKey);
+                    return candidate;
+                }
+                queue.Enqueue(candidate);
+            }
+            if (queue.Count == 0) duplicates.Remove(subKey);
+            return null;
+        }
+        // A log cleared or a file replaced between passes can reuse record numbers for different events.
+        if (!byKey.TryGetValue(rendered.Key, out EventItem? item) || item.HasMessage || !IsSameEvent(rendered, item)) return null;
+        byKey.Remove(rendered.Key);
+        return item;
     }
 
     /// <summary>Finds one event again by its record number and reads its XML and the names of its parts.</summary>
@@ -162,14 +233,19 @@ public static unsafe class EventReader
             return new EventDetail(null, null, null, null, null, CoreText.F("Error_ReadAgain", new System.ComponentModel.Win32Exception(error).Message));
         try
         {
-            using var formatter = new MessageFormatter();
+            using var formatter = new MessageFormatter(fromFile ? source.Path : null);
+            string? xml = formatter.RenderXml(evt);
+            IReadOnlyList<EventDataField> data = xml is null
+                ? []
+                : MessageFormatter.ExtractData(xml).Select(d => new EventDataField(d.Name, d.Value)).ToArray();
             return new EventDetail(
-                formatter.RenderXml(evt),
+                xml,
                 formatter.FormatMessage(evt, item),
                 formatter.FormatTask(evt, item),
                 item.Opcode == 0 ? null : formatter.FormatPart(evt, item, Wevtapi.EvtFormatMessageOpcode),
                 item.Keywords == 0 ? null : formatter.FormatPart(evt, item, Wevtapi.EvtFormatMessageKeyword),
-                null);
+                null,
+                data);
         }
         finally
         {
@@ -180,46 +256,54 @@ public static unsafe class EventReader
     /// <summary>
     /// Positions a query on the event through a bookmark, which is fast even in large logs, and falls back to an XPath
     /// query on the record number when the bookmark does not lead to the right event. Several events can share a
-    /// record number (forwarded events from different computers), so the fallback checks each of them.
+    /// record number (forwarded events from different computers or analytic/debug logs), so the fallback checks each.
     /// </summary>
     private static nint FindEvent(string path, int flags, EventItem item, out int error)
     {
         string recordId = item.RecordId.ToString(CultureInfo.InvariantCulture);
-        string bookmarkChannel = (flags & Wevtapi.EvtQueryFilePath) != 0 ? item.Channel : path;
-        string bookmarkXml = $"<BookmarkList><Bookmark Channel=\"{SecurityElement.Escape(bookmarkChannel)}\" RecordId=\"{recordId}\" IsCurrent=\"true\"/></BookmarkList>";
-        nint bookmark = Wevtapi.EvtCreateBookmark(bookmarkXml);
-        if (bookmark != 0)
+        if (item.RecordId != 0)
         {
-            try
+            string bookmarkChannel = (flags & Wevtapi.EvtQueryFilePath) != 0 ? item.Channel : path;
+            string bookmarkXml = $"<BookmarkList><Bookmark Channel=\"{SecurityElement.Escape(bookmarkChannel)}\" RecordId=\"{recordId}\" IsCurrent=\"true\"/></BookmarkList>";
+            nint bookmark = Wevtapi.EvtCreateBookmark(bookmarkXml);
+            if (bookmark != 0)
             {
-                nint query = Wevtapi.EvtQuery(0, path, "*", flags);
-                if (query != 0)
+                try
                 {
-                    try
+                    nint query = Wevtapi.EvtQuery(0, path, "*", flags);
+                    if (query != 0)
                     {
-                        if (Wevtapi.EvtSeek(query, 0, bookmark, 0, Wevtapi.EvtSeekRelativeToBookmark))
+                        try
                         {
-                            nint evt = NextIfMatches(query, item, path, attempts: 1);
-                            if (evt != 0)
+                            if (Wevtapi.EvtSeek(query, 0, bookmark, 0, Wevtapi.EvtSeekRelativeToBookmark))
                             {
-                                error = 0;
-                                return evt;
+                                nint evt = NextIfMatches(query, item, path, attempts: 1);
+                                if (evt != 0)
+                                {
+                                    error = 0;
+                                    return evt;
+                                }
                             }
                         }
-                    }
-                    finally
-                    {
-                        Wevtapi.EvtClose(query);
+                        finally
+                        {
+                            Wevtapi.EvtClose(query);
+                        }
                     }
                 }
-            }
-            finally
-            {
-                Wevtapi.EvtClose(bookmark);
+                finally
+                {
+                    Wevtapi.EvtClose(bookmark);
+                }
             }
         }
 
-        nint byId = Wevtapi.EvtQuery(0, path, $"*[System[EventRecordID={recordId}]]", flags);
+        // Analytic and debug logs may emit an empty <EventRecordID/> element (read as RecordId 0), where EventRecordID=0
+        // matches nothing; fall back to filtering by EventID and verifying full event identity in NextIfMatches.
+        string fallbackQuery = item.RecordId != 0
+            ? $"*[System[EventRecordID={recordId}]]"
+            : $"*[System[EventID={item.EventId.ToString(CultureInfo.InvariantCulture)}]]";
+        nint byId = Wevtapi.EvtQuery(0, path, fallbackQuery, flags);
         if (byId == 0)
         {
             error = Marshal.GetLastPInvokeError();
@@ -227,7 +311,7 @@ public static unsafe class EventReader
         }
         try
         {
-            nint evt = NextIfMatches(byId, item, path, attempts: 1000);
+            nint evt = NextIfMatches(byId, item, path, attempts: 50_000);
             error = evt == 0 ? Wevtapi.ErrorNoMoreItems : 0;
             return evt;
         }
@@ -269,54 +353,74 @@ public static unsafe class EventReader
     /// </summary>
     private static void ForEachBatch(QueryPart part, ReadSummary summary, CancellationToken cancellation, Action<nint[], int, bool> onBatch)
     {
-        bool newestFirst = (part.Flags & Wevtapi.EvtQueryReverseDirection) != 0;
-        nint query = Wevtapi.EvtQuery(0, part.Path, part.Query, part.Flags);
-        if (query == 0 && newestFirst)
+        for (int attempt = 0; attempt < 2; attempt++)
         {
-            newestFirst = false;
-            // Analytic and debug logs can only be read oldest first. The list sorts the events afterwards anyway.
-            int reverseError = Marshal.GetLastPInvokeError();
-            query = Wevtapi.EvtQuery(0, part.Path, part.Query, part.Flags & ~Wevtapi.EvtQueryReverseDirection);
-            if (query == 0)
+            bool newestFirst = (part.Flags & Wevtapi.EvtQueryReverseDirection) != 0;
+            nint query = Wevtapi.EvtQuery(0, part.Path, part.Query, part.Flags);
+            if (query == 0 && newestFirst)
             {
-                summary.AddProblem(CoreText.F("Error_Open", part.Path ?? CoreText.Get("Logs_Generic")), reverseError);
+                int reverseError = Marshal.GetLastPInvokeError();
+                // Fatal open errors will never succeed by switching read direction; avoid redundant retries and Security audit hits.
+                if (reverseError is Wevtapi.ErrorAccessDenied or Wevtapi.ErrorFileNotFound or Wevtapi.ErrorPathNotFound
+                    or Wevtapi.ErrorEvtChannelNotFound or Wevtapi.ErrorEvtInvalidOperationOverEnabledDirectChannel)
+                {
+                    summary.AddProblem(CoreText.F("Error_Open", part.Path ?? CoreText.Get("Logs_Generic")), reverseError);
+                    return;
+                }
+                newestFirst = false;
+                // Analytic and debug logs can only be read oldest first. The list sorts the events afterwards anyway.
+                query = Wevtapi.EvtQuery(0, part.Path, part.Query, part.Flags & ~Wevtapi.EvtQueryReverseDirection);
+                if (query == 0)
+                {
+                    summary.AddProblem(CoreText.F("Error_Open", part.Path ?? CoreText.Get("Logs_Generic")), reverseError);
+                    return;
+                }
+            }
+            else if (query == 0)
+            {
+                summary.AddProblem(CoreText.F("Error_Open", part.Path ?? CoreText.Get("Logs_Generic")), Marshal.GetLastPInvokeError());
                 return;
             }
-        }
-        else if (query == 0)
-        {
-            summary.AddProblem(CoreText.F("Error_Open", part.Path ?? CoreText.Get("Logs_Generic")), Marshal.GetLastPInvokeError());
-            return;
-        }
 
-        var handles = new nint[BatchSize];
-        try
-        {
-            while (!cancellation.IsCancellationRequested)
+            bool deliveredAny = false;
+            bool retryStale = false;
+            var handles = new nint[BatchSize];
+            try
             {
-                int returned;
-                bool ok;
-                fixed (nint* buffer = handles)
-                    ok = Wevtapi.EvtNext(query, BatchSize, buffer, Wevtapi.Infinite, 0, out returned);
-                if (!ok)
+                while (!cancellation.IsCancellationRequested)
                 {
-                    int error = Marshal.GetLastPInvokeError();
-                    if (error != Wevtapi.ErrorNoMoreItems) summary.AddProblem(CoreText.F("Error_ReadStopped", part.Path ?? CoreText.Get("Logs_Generic")), error);
-                    break;
-                }
-                try
-                {
-                    onBatch(handles, returned, newestFirst);
-                }
-                finally
-                {
-                    for (int i = 0; i < returned; i++) Wevtapi.EvtClose(handles[i]);
+                    int returned;
+                    bool ok;
+                    fixed (nint* buffer = handles)
+                        ok = Wevtapi.EvtNext(query, BatchSize, buffer, Wevtapi.Infinite, 0, out returned);
+                    if (!ok)
+                    {
+                        int error = Marshal.GetLastPInvokeError();
+                        if (error == Wevtapi.ErrorEvtQueryResultStale && !deliveredAny && attempt == 0)
+                        {
+                            // An actively rolling circular log can invalidate a brand-new query before the first batch is read.
+                            retryStale = true;
+                            break;
+                        }
+                        if (error != Wevtapi.ErrorNoMoreItems) summary.AddProblem(CoreText.F("Error_ReadStopped", part.Path ?? CoreText.Get("Logs_Generic")), error);
+                        break;
+                    }
+                    deliveredAny = true;
+                    try
+                    {
+                        onBatch(handles, returned, newestFirst);
+                    }
+                    finally
+                    {
+                        for (int i = 0; i < returned; i++) Wevtapi.EvtClose(handles[i]);
+                    }
                 }
             }
-        }
-        finally
-        {
-            Wevtapi.EvtClose(query);
+            finally
+            {
+                Wevtapi.EvtClose(query);
+            }
+            if (!retryStale) return;
         }
     }
 }

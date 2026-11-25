@@ -105,7 +105,7 @@ public static class EventExport
     /// </summary>
     internal static string CsvCell(string value)
     {
-        if (value.Length > 0 && (StartsFormula(value[0]) || value[0] is '\t' or '\r')) value = "'" + value;
+        if (value.Length > 0 && (StartsFormula(value[0]) || value[0] is '\t' or '\r' or '\n')) value = "'" + value;
         if (value.AsSpan().IndexOfAny(";\t\r\n") >= 0) value = DefuseAfterSeparators(value);
         bool needsQuotes = value.AsSpan().IndexOfAny(",\";\t\r\n") >= 0;
         return needsQuotes ? "\"" + value.Replace("\"", "\"\"") + "\"" : value;

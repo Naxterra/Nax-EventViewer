@@ -79,6 +79,60 @@ public sealed class MessageStore
         return "";
     }
 
+    /// <summary>
+    /// Copies the stored messages of <paramref name="items"/> into a fresh store so lines belonging to overwritten
+    /// events can be reclaimed. Safe to run off the UI thread; the caller applies the returned mappings on the UI thread.
+    /// </summary>
+    public static (MessageStore Store, List<(EventItem Item, StoredMessage Message)> Remapped) Compact(IEnumerable<EventItem> items)
+    {
+        var fresh = new MessageStore();
+        var remapped = new List<(EventItem, StoredMessage)>();
+        foreach (EventItem item in items)
+        {
+            if (item.StoredLines is var (oldStore, oldLines))
+            {
+                remapped.Add((item, fresh.CopyLines(oldStore, oldLines)));
+            }
+            else if (item.PlainMessage is { } plain)
+            {
+                remapped.Add((item, fresh.Add(plain)));
+            }
+        }
+        return (fresh, remapped);
+    }
+
+    /// <summary>
+    /// Remaps an event whose message is still plain or stored in an older <see cref="MessageStore"/> into this store,
+    /// returning null when the event has no message or already belongs to this store.
+    /// </summary>
+    public StoredMessage? RemapIfDifferent(EventItem item)
+    {
+        if (item.StoredLines is var (oldStore, oldLines))
+            return ReferenceEquals(oldStore, this) ? null : CopyLines(oldStore, oldLines);
+        if (item.PlainMessage is { } plain)
+            return Add(plain);
+        return null;
+    }
+
+    private StoredMessage CopyLines(MessageStore source, int[] sourceLines)
+    {
+        var ids = new int[sourceLines.Length];
+        lock (_gate)
+        {
+            for (int i = 0; i < sourceLines.Length; i++)
+            {
+                string line = source.Line(sourceLines[i]);
+                if (!_ids.TryGetValue(line, out int id))
+                {
+                    id = Append(line);
+                    _ids.Add(line, id);
+                }
+                ids[i] = id;
+            }
+        }
+        return new StoredMessage(this, ids);
+    }
+
     private int Append(string line)
     {
         int id = _count;
@@ -96,8 +150,8 @@ public sealed class MessageStore
     }
 }
 
-/// <summary>A message kept in a <see cref="MessageStore"/>: the store and the numbers of the message's lines.</summary>
-public readonly record struct StoredMessage(MessageStore Store, int[] Lines)
+/// <summary>A message kept in a <see cref="MessageStore"/>: an immutable pair of the store and its line numbers.</summary>
+public sealed record StoredMessage(MessageStore Store, int[] Lines)
 {
     public override string ToString() => Store.Join(Lines);
 }

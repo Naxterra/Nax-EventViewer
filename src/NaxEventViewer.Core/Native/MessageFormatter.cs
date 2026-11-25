@@ -9,8 +9,9 @@ namespace NaxEventViewer.Core.Native;
 /// Turns events into readable text through each provider's message resources. Opening a provider's metadata is the
 /// expensive step, so every provider is opened once and kept open. One instance belongs to one thread.
 /// </summary>
-internal sealed unsafe class MessageFormatter : IDisposable
+internal sealed unsafe class MessageFormatter(string? logFilePath = null) : IDisposable
 {
+    private readonly string? _logFilePath = logFilePath;
     private readonly Dictionary<string, nint> _publishers = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<(string Provider, ushort Task), string?> _taskNames = new();
     private char[] _buffer = new char[2048];
@@ -53,7 +54,9 @@ internal sealed unsafe class MessageFormatter : IDisposable
     {
         if (provider.Length == 0) return 0;
         if (_publishers.TryGetValue(provider, out nint handle)) return handle;
-        handle = Wevtapi.EvtOpenPublisherMetadata(0, provider, null, 0, 0);
+        // For archived .evtx files, try companion LocaleMetaData (.MTA) first, then fall back to local providers.
+        if (_logFilePath is not null) handle = Wevtapi.EvtOpenPublisherMetadata(0, provider, _logFilePath, 0, 0);
+        if (handle == 0) handle = Wevtapi.EvtOpenPublisherMetadata(0, provider, null, 0, 0);
         _publishers[provider] = handle;
         return handle;
     }

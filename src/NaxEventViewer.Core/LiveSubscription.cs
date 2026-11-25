@@ -21,7 +21,7 @@ public sealed unsafe class LiveSubscription : IDisposable
     private readonly Action<string> _onError;
     private readonly SystemRenderer _renderer;
     private readonly MessageFormatter _formatter = new();
-    private readonly MessageStore _store;
+    private MessageStore _store;
     private readonly Bookmark _last = new();
     private readonly nint _id;
     private nint _subscription;
@@ -94,6 +94,12 @@ public sealed unsafe class LiveSubscription : IDisposable
     }
 
     internal nint Id => _id;
+
+    /// <summary>Switches future live events to a freshly compacted <see cref="MessageStore"/>.</summary>
+    public void UseStore(MessageStore store)
+    {
+        lock (_gate) _store = store;
+    }
 
     /// <summary>
     /// A bookmark on the last event this subscription delivered, or null when it delivered none. Read it after

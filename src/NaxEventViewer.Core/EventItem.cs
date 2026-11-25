@@ -26,11 +26,11 @@ public sealed class EventItem : INotifyPropertyChanged
     public const ulong AuditSuccessKeyword = 0x0020_0000_0000_0000;
     private const int PreviewLength = 300;
 
-    // The message is either a plain string (an event formatted on its own) or lines in the load's MessageStore.
-    private string? _plainMessage;
-    private MessageStore? _store;
-    private int[]? _lines;
-    private string? _taskName;
+    // The message is either a plain string (an event formatted on its own) or an immutable StoredMessage in a MessageStore.
+    // Holding Store and Lines in one volatile reference prevents a torn read when MessageStore compaction replaces them.
+    private volatile string? _plainMessage;
+    private volatile StoredMessage? _stored;
+    private volatile string? _taskName;
     private string? _timeText;
     private string? _eventIdText;
 
@@ -66,6 +66,8 @@ public sealed class EventItem : INotifyPropertyChanged
 
     public string LevelText => KindText(Kind);
 
+    public string LogDisplayName => Channel.Length > 0 ? Channel : Log;
+
     public string TimeText => _timeText ??= TimeCreatedUtc.ToLocalTime().ToString("G", CultureInfo.CurrentCulture);
 
     public string EventIdText => _eventIdText ??= EventId.ToString(CultureInfo.InvariantCulture);
@@ -76,8 +78,7 @@ public sealed class EventItem : INotifyPropertyChanged
         get
         {
             if (_plainMessage is { } plain) return plain;
-            int[]? lines = Volatile.Read(ref _lines);
-            return lines is null ? null : _store!.Join(lines);
+            return _stored is { } stored ? stored.Store.Join(stored.Lines) : null;
         }
     }
 
@@ -87,8 +88,7 @@ public sealed class EventItem : INotifyPropertyChanged
         get
         {
             if (_plainMessage is { } plain) return MakePreview(plain);
-            int[]? lines = Volatile.Read(ref _lines);
-            return lines is null ? "" : _store!.Preview(lines);
+            return _stored is { } stored ? stored.Store.Preview(stored.Lines) : "";
         }
     }
 
@@ -99,15 +99,15 @@ public sealed class EventItem : INotifyPropertyChanged
     {
         get
         {
-            int[]? lines = Volatile.Read(ref _lines);
-            return lines is null || _plainMessage is not null ? null : (_store!, lines);
+            if (_plainMessage is not null) return null;
+            return _stored is { } stored ? (stored.Store, stored.Lines) : null;
         }
     }
 
     /// <summary>The task category name, or the task number when the provider gives no name.</summary>
     public string TaskName => _taskName ?? (Task == 0 ? CoreText.Get("Task_None") : Task.ToString(CultureInfo.InvariantCulture));
 
-    public bool HasMessage => _plainMessage is not null || Volatile.Read(ref _lines) is not null;
+    public bool HasMessage => _plainMessage is not null || _stored is not null;
 
     public static string KindText(EventLevelKind kind) => CoreText.Get(kind switch
     {
@@ -130,10 +130,16 @@ public sealed class EventItem : INotifyPropertyChanged
     /// <summary>Stores a message kept in the load's <see cref="MessageStore"/>. Call this on the UI thread once the item is visible.</summary>
     public void SetFormatted(StoredMessage message, string? taskName)
     {
-        _store = message.Store;
-        // Published after the store, so a reader on another thread that sees the lines also sees their store.
-        Volatile.Write(ref _lines, message.Lines);
+        _stored = message;
+        _plainMessage = null;
         Changed(taskName);
+    }
+
+    /// <summary>Moves an already-formatted stored message to a compacted <see cref="MessageStore"/> without changing its text.</summary>
+    public void ReplaceStoredMessage(StoredMessage message)
+    {
+        _stored = message;
+        _plainMessage = null;
     }
 
     private void Changed(string? taskName)

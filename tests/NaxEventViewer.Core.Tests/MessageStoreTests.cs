@@ -108,6 +108,72 @@ internal static class MessageStoreTests
                 Check.That(watch.Elapsed < TimeSpan.FromSeconds(3), $"it took {watch.Elapsed.TotalSeconds:0.00} s");
                 Check.That(shown.Count > 0 && counts.Sum() == shown.Count, "the search found events and the counts match");
             });
+
+        yield return ("compacting_message_store_reclaims_dropped_lines_and_keeps_surviving_text",
+            "Compacting a message store for surviving events drops lines from removed events while keeping surviving messages identical.",
+            () =>
+            {
+                var store = new MessageStore();
+                var dropped = Fixtures.Item(Now, recordId: 1);
+                dropped.SetFormatted(store.Add("Header\r\nDropped unique line 1\r\nDropped unique line 2"), null);
+                var kept = Fixtures.Item(Now, recordId: 2);
+                string keptText = "Header\r\nKept unique line";
+                kept.SetFormatted(store.Add(keptText), null);
+                Check.Equal(4, store.LineCount);
+
+                (MessageStore compacted, List<(EventItem Item, StoredMessage Message)> remapped) = MessageStore.Compact([kept]);
+                foreach (var (item, message) in remapped) item.ReplaceStoredMessage(message);
+                Check.Equal(2, compacted.LineCount);
+                Check.Equal(keptText, kept.Message);
+            });
+
+        yield return ("concurrent_compaction_never_causes_torn_reads",
+            "Replacing stored messages during compaction while another thread filters and reads them never throws or returns corrupted text.",
+            () =>
+            {
+                var store = new MessageStore();
+                var dropped = new EventItem[500];
+                for (int i = 0; i < dropped.Length; i++)
+                {
+                    dropped[i] = Fixtures.Item(Now, recordId: (ulong)(i + 1));
+                    dropped[i].SetFormatted(store.Add($"Dropped header {i}\r\nDropped detail {i}"), null);
+                }
+                var kept = new EventItem[200];
+                for (int i = 0; i < kept.Length; i++)
+                {
+                    kept[i] = Fixtures.Item(Now, recordId: (ulong)(1000 + i));
+                    kept[i].SetFormatted(store.Add($"Kept header\r\nKept unique {i}"), null);
+                }
+
+                using var stop = new CancellationTokenSource();
+                var filter = new EventFilter { Text = "Kept unique" };
+                var reader = Task.Run(() =>
+                {
+                    while (!stop.IsCancellationRequested)
+                    {
+                        foreach (EventItem item in kept)
+                        {
+                            Check.That(filter.Matches(item), "matching item must stay matched during compaction");
+                            string? text = item.Message;
+                            Check.That(text is not null && text.StartsWith("Kept header", StringComparison.Ordinal), "message text must stay intact");
+                        }
+                    }
+                });
+                try
+                {
+                    for (int round = 0; round < 10; round++)
+                    {
+                        (MessageStore fresh, List<(EventItem Item, StoredMessage Message)> remapped) = MessageStore.Compact(kept);
+                        foreach (var (item, message) in remapped) item.ReplaceStoredMessage(message);
+                        filter.ClearLineCache();
+                    }
+                }
+                finally
+                {
+                    stop.Cancel();
+                    reader.Wait();
+                }
+            });
     }
 
     /// <summary>A message shaped like a Security logon event: mostly fixed lines, with a few lines that change per event.</summary>

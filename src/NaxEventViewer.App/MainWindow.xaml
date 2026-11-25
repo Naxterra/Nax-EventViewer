@@ -7,7 +7,7 @@
     xmlns:core="using:NaxEventViewer.Core"
     Title="Nax Event Viewer">
 
-    <Grid x:Name="Root">
+    <Grid x:Name="Root" AllowDrop="True" DragOver="Root_DragOver" Drop="Root_Drop">
         <Grid.RowDefinitions>
             <RowDefinition Height="40" />
             <RowDefinition Height="Auto" />
@@ -38,18 +38,25 @@
         <!-- Search, filters and commands -->
         <Grid Grid.Row="1" Padding="12,0,8,8" ColumnSpacing="8">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" MaxWidth="420" />
+                <ColumnDefinition Width="*" MaxWidth="380" />
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" MinWidth="0" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <TextBox x:Name="SearchBox" MinWidth="220" VerticalAlignment="Center"
+            <TextBox x:Name="SearchBox" MinWidth="200" VerticalAlignment="Center"
                      TextChanged="FilterText_Changed" />
-            <TextBox x:Name="EventIdBox" Grid.Column="1" Width="190" VerticalAlignment="Center"
+            <TextBox x:Name="EventIdBox" Grid.Column="1" Width="180" VerticalAlignment="Center"
                      TextChanged="FilterText_Changed" />
-            <ComboBox x:Name="TimeBox" Grid.Column="2" Width="150" VerticalAlignment="Center" SelectionChanged="TimeBox_SelectionChanged" />
-            <CommandBar Grid.Column="4" DefaultLabelPosition="Right" Background="Transparent" IsOpen="False" VerticalAlignment="Center">
+            <ComboBox x:Name="TimeBox" Grid.Column="2" Width="162" VerticalAlignment="Center" SelectionChanged="TimeBox_SelectionChanged" />
+            <Button x:Name="ResetFilterButton" Grid.Column="3" VerticalAlignment="Center" Visibility="Collapsed" Click="ResetFilter_Click">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <FontIcon Glyph="&#xE894;" FontSize="12" />
+                    <TextBlock x:Name="ResetFilterText" />
+                </StackPanel>
+            </Button>
+            <CommandBar Grid.Column="5" DefaultLabelPosition="Right" Background="Transparent" IsOpen="False" VerticalAlignment="Center">
                 <AppBarButton x:Name="RefreshButton" Icon="Refresh" Click="Refresh_Click" />
                 <AppBarToggleButton x:Name="LiveToggle" IsChecked="True" Click="LiveToggle_Click">
                     <AppBarToggleButton.Icon>
@@ -74,6 +81,12 @@
                 <AppBarButton x:Name="SettingsButton" Icon="Setting">
                     <AppBarButton.Flyout>
                         <MenuFlyout x:Name="SettingsMenu" Placement="BottomEdgeAlignedRight" Opening="SettingsMenu_Opening">
+                            <MenuFlyoutSubItem x:Name="OverviewWindowMenu">
+                                <RadioMenuFlyoutItem x:Name="Overview1hItem" GroupName="OverviewWindow" Tag="1" Click="OverviewWindow_Click" />
+                                <RadioMenuFlyoutItem x:Name="Overview24hItem" GroupName="OverviewWindow" Tag="24" Click="OverviewWindow_Click" />
+                                <RadioMenuFlyoutItem x:Name="Overview7dItem" GroupName="OverviewWindow" Tag="168" Click="OverviewWindow_Click" />
+                                <RadioMenuFlyoutItem x:Name="Overview30dItem" GroupName="OverviewWindow" Tag="720" Click="OverviewWindow_Click" />
+                            </MenuFlyoutSubItem>
                             <MenuFlyoutSubItem x:Name="LanguageMenu">
                                 <RadioMenuFlyoutItem x:Name="LanguageSystemItem" GroupName="Language" Tag="" Click="Language_Click" />
                                 <RadioMenuFlyoutItem x:Name="LanguageEnglishItem" GroupName="Language" Tag="en-US" Click="Language_Click" />
@@ -95,16 +108,19 @@
         <!-- Tree on the left; list above the detail pane on the right -->
         <Grid Grid.Row="3" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,1,0,1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="300" MinWidth="200" />
-                <ColumnDefinition Width="*" />
+                <ColumnDefinition x:Name="TreeColumn" Width="300" MinWidth="180" />
+                <ColumnDefinition Width="6" />
+                <ColumnDefinition Width="*" MinWidth="360" />
             </Grid.ColumnDefinitions>
 
             <Grid BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,0,1,0">
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
-                <TreeView x:Name="LogTree" SelectionMode="Single" ItemInvoked="LogTree_ItemInvoked" ContextRequested="LogTree_ContextRequested" Padding="0,6,0,0">
+                <TextBox x:Name="TreeSearchBox" Margin="10,8,10,4" TextChanged="TreeSearch_Changed" />
+                <TreeView x:Name="LogTree" Grid.Row="1" SelectionMode="Single" ItemInvoked="LogTree_ItemInvoked" ContextRequested="LogTree_ContextRequested" Padding="0,2,0,0">
                     <TreeView.ItemTemplate>
                         <DataTemplate x:DataType="local:LogNode">
                             <TreeViewItem ItemsSource="{x:Bind Children}" IsExpanded="{x:Bind IsExpanded, Mode=TwoWay}" AutomationProperties.Name="{x:Bind Name}">
@@ -123,26 +139,33 @@
                         </DataTemplate>
                     </TreeView.ItemTemplate>
                 </TreeView>
-                <CheckBox x:Name="ShowAllLogsBox" Grid.Row="1" Margin="12,6" Click="ShowAllLogs_Click" />
+                <CheckBox x:Name="ShowAllLogsBox" Grid.Row="2" Margin="12,6" Click="ShowAllLogs_Click" />
             </Grid>
 
-            <Grid Grid.Column="1">
+            <local:PaneSplitter x:Name="TreeSplitter" Grid.Column="1" Orientation="Vertical" />
+
+            <Grid Grid.Column="2">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" MinHeight="120" />
-                    <RowDefinition Height="340" MinHeight="120" />
+                    <RowDefinition Height="6" />
+                    <RowDefinition x:Name="DetailRow" Height="340" MinHeight="140" />
                 </Grid.RowDefinitions>
 
-                <Grid Margin="16,10,12,4" ColumnSpacing="16">
+                <Grid Margin="16,8,12,4" ColumnSpacing="14" RowSpacing="4">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
                     <TextBlock x:Name="LogTitle" Style="{StaticResource SubtitleTextBlockStyle}" TextTrimming="CharacterEllipsis" MaxWidth="420" VerticalAlignment="Center" />
-                    <StackPanel x:Name="LevelButtons" Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                    <local:WrapPanel x:Name="LevelButtons" Grid.Column="1" HorizontalSpacing="4" VerticalSpacing="4" VerticalAlignment="Center">
                         <!-- A shown level looks like a normal button and a hidden one fades out, instead of the bright accent of a checked toggle. -->
-                        <StackPanel.Resources>
+                        <local:WrapPanel.Resources>
                             <ResourceDictionary>
                                 <ResourceDictionary.ThemeDictionaries>
                                     <ResourceDictionary x:Key="Default">
@@ -173,25 +196,54 @@
                                     </ResourceDictionary>
                                 </ResourceDictionary.ThemeDictionaries>
                             </ResourceDictionary>
-                        </StackPanel.Resources>
+                        </local:WrapPanel.Resources>
+                    </local:WrapPanel>
+                    <StackPanel x:Name="ActiveFilterStrip" Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="8" Visibility="Collapsed">
+                        <Button x:Name="EditCustomRangeButton" Padding="6,2" Visibility="Collapsed" Click="EditCustomRange_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE787;" FontSize="12" />
+                                <TextBlock x:Name="EditCustomRangeText" Style="{StaticResource CaptionTextBlockStyle}" />
+                            </StackPanel>
+                        </Button>
+                        <TextBlock x:Name="ActiveFilterSummary" Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
                     </StackPanel>
                 </Grid>
 
-                <Grid x:Name="ColumnHeaders" Grid.Row="1" Margin="16,0,28,0" ColumnSpacing="12">
+                <Grid x:Name="ColumnHeaders" Grid.Row="1" Margin="16,0,28,0">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="120" />
-                        <ColumnDefinition Width="150" />
-                        <ColumnDefinition Width="230" />
-                        <ColumnDefinition Width="56" />
-                        <ColumnDefinition Width="140" />
+                        <ColumnDefinition Width="{Binding Level, Source={StaticResource ColumnWidths}}" />
+                        <ColumnDefinition Width="{Binding Time, Source={StaticResource ColumnWidths}}" />
+                        <ColumnDefinition Width="{Binding Log, Source={StaticResource ColumnWidths}}" />
+                        <ColumnDefinition Width="{Binding Source, Source={StaticResource ColumnWidths}}" />
+                        <ColumnDefinition Width="{Binding EventId, Source={StaticResource ColumnWidths}}" />
+                        <ColumnDefinition Width="{Binding Task, Source={StaticResource ColumnWidths}}" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
-                    <Button x:Name="LevelHeader" Tag="Level" Style="{StaticResource ColumnHeaderButtonStyle}" Click="ColumnHeader_Click" />
-                    <Button x:Name="TimeHeader" Grid.Column="1" Tag="Time" Style="{StaticResource ColumnHeaderButtonStyle}" Click="ColumnHeader_Click" />
-                    <Button x:Name="SourceHeader" Grid.Column="2" Tag="Source" Style="{StaticResource ColumnHeaderButtonStyle}" Click="ColumnHeader_Click" />
-                    <Button x:Name="EventIdHeader" Grid.Column="3" Tag="EventId" Style="{StaticResource ColumnHeaderButtonStyle}" Click="ColumnHeader_Click" />
-                    <Button x:Name="TaskHeader" Grid.Column="4" Tag="Task" Style="{StaticResource ColumnHeaderButtonStyle}" Click="ColumnHeader_Click" />
-                    <TextBlock x:Name="MessageHeader" Grid.Column="5" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <Grid Padding="0,0,10,0">
+                        <Button x:Name="LevelHeader" Tag="Level" Style="{StaticResource ColumnHeaderButtonStyle}" Click="ColumnHeader_Click" />
+                        <local:PaneSplitter x:Name="LevelColSplitter" Width="6" HorizontalAlignment="Right" Margin="0,0,-8,0" Orientation="Vertical" />
+                    </Grid>
+                    <Grid Grid.Column="1" Padding="0,0,10,0">
+                        <Button x:Name="TimeHeader" Tag="Time" Style="{StaticResource ColumnHeaderButtonStyle}" Click="ColumnHeader_Click" />
+                        <local:PaneSplitter x:Name="TimeColSplitter" Width="6" HorizontalAlignment="Right" Margin="0,0,-8,0" Orientation="Vertical" />
+                    </Grid>
+                    <Grid Grid.Column="2" Padding="0,0,10,0" Visibility="{Binding LogVisibility, Source={StaticResource ColumnWidths}}">
+                        <Button x:Name="LogHeader" Tag="Log" Style="{StaticResource ColumnHeaderButtonStyle}" Click="ColumnHeader_Click" />
+                        <local:PaneSplitter x:Name="LogColSplitter" Width="6" HorizontalAlignment="Right" Margin="0,0,-8,0" Orientation="Vertical" />
+                    </Grid>
+                    <Grid Grid.Column="3" Padding="0,0,10,0">
+                        <Button x:Name="SourceHeader" Tag="Source" Style="{StaticResource ColumnHeaderButtonStyle}" Click="ColumnHeader_Click" />
+                        <local:PaneSplitter x:Name="SourceColSplitter" Width="6" HorizontalAlignment="Right" Margin="0,0,-8,0" Orientation="Vertical" />
+                    </Grid>
+                    <Grid Grid.Column="4" Padding="0,0,10,0">
+                        <Button x:Name="EventIdHeader" Tag="EventId" Style="{StaticResource ColumnHeaderButtonStyle}" Click="ColumnHeader_Click" />
+                        <local:PaneSplitter x:Name="EventIdColSplitter" Width="6" HorizontalAlignment="Right" Margin="0,0,-8,0" Orientation="Vertical" />
+                    </Grid>
+                    <Grid Grid.Column="5" Padding="0,0,10,0">
+                        <Button x:Name="TaskHeader" Tag="Task" Style="{StaticResource ColumnHeaderButtonStyle}" Click="ColumnHeader_Click" />
+                        <local:PaneSplitter x:Name="TaskColSplitter" Width="6" HorizontalAlignment="Right" Margin="0,0,-8,0" Orientation="Vertical" />
+                    </Grid>
+                    <TextBlock x:Name="MessageHeader" Grid.Column="6" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 </Grid>
 
                 <ListView x:Name="EventList" Grid.Row="2" SelectionMode="Extended" SelectionChanged="EventList_SelectionChanged"
@@ -205,24 +257,27 @@
                     </ListView.ItemContainerStyle>
                     <ListView.ItemTemplate>
                         <DataTemplate x:DataType="core:EventItem">
-                            <Grid Height="30" ColumnSpacing="12">
+                            <Grid Height="30">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="120" />
-                                    <ColumnDefinition Width="150" />
-                                    <ColumnDefinition Width="230" />
-                                    <ColumnDefinition Width="56" />
-                                    <ColumnDefinition Width="140" />
+                                    <ColumnDefinition Width="{Binding Level, Source={StaticResource ColumnWidths}}" />
+                                    <ColumnDefinition Width="{Binding Time, Source={StaticResource ColumnWidths}}" />
+                                    <ColumnDefinition Width="{Binding Log, Source={StaticResource ColumnWidths}}" />
+                                    <ColumnDefinition Width="{Binding Source, Source={StaticResource ColumnWidths}}" />
+                                    <ColumnDefinition Width="{Binding EventId, Source={StaticResource ColumnWidths}}" />
+                                    <ColumnDefinition Width="{Binding Task, Source={StaticResource ColumnWidths}}" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
-                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Margin="0,0,10,0">
                                     <FontIcon Glyph="{x:Bind local:LevelVisuals.Glyph(Kind)}" Foreground="{x:Bind local:LevelVisuals.Brush(Kind)}" FontSize="14" />
                                     <TextBlock Text="{x:Bind LevelText}" Style="{StaticResource CellTextStyle}" />
                                 </StackPanel>
-                                <TextBlock Grid.Column="1" Text="{x:Bind TimeText}" Style="{StaticResource CellTextStyle}" />
-                                <TextBlock Grid.Column="2" Text="{x:Bind Provider}" Style="{StaticResource CellTextStyle}" />
-                                <TextBlock Grid.Column="3" Text="{x:Bind EventIdText}" Style="{StaticResource CellTextStyle}" />
-                                <TextBlock Grid.Column="4" Text="{x:Bind TaskName, Mode=OneWay}" Style="{StaticResource CellTextStyle}" />
-                                <TextBlock Grid.Column="5" Text="{x:Bind MessagePreview, Mode=OneWay}" Style="{StaticResource CellTextStyle}"
+                                <TextBlock Grid.Column="1" Text="{x:Bind TimeText}" Style="{StaticResource CellTextStyle}" Margin="0,0,10,0" />
+                                <TextBlock Grid.Column="2" Text="{x:Bind LogDisplayName}" Style="{StaticResource CellTextStyle}" Margin="0,0,10,0"
+                                           Visibility="{Binding LogVisibility, Source={StaticResource ColumnWidths}}" />
+                                <TextBlock Grid.Column="3" Text="{x:Bind Provider}" Style="{StaticResource CellTextStyle}" Margin="0,0,10,0" />
+                                <TextBlock Grid.Column="4" Text="{x:Bind EventIdText}" Style="{StaticResource CellTextStyle}" Margin="0,0,10,0" />
+                                <TextBlock Grid.Column="5" Text="{x:Bind TaskName, Mode=OneWay}" Style="{StaticResource CellTextStyle}" Margin="0,0,10,0" />
+                                <TextBlock Grid.Column="6" Text="{x:Bind MessagePreview, Mode=OneWay}" Style="{StaticResource CellTextStyle}"
                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                             </Grid>
                         </DataTemplate>
@@ -231,8 +286,10 @@
                 <TextBlock x:Name="EmptyText" Grid.Row="2" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="420" />
 
+                <local:PaneSplitter x:Name="DetailSplitter" Grid.Row="3" Orientation="Horizontal" />
+
                 <!-- Detail pane: message on the left, fields on the right -->
-                <Grid Grid.Row="3" Background="{ThemeResource LayerFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,1,0,0">
+                <Grid Grid.Row="4" Background="{ThemeResource LayerFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,1,0,0">
                     <TextBlock x:Name="DetailEmptyText" HorizontalAlignment="Center" VerticalAlignment="Center"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     <Grid x:Name="DetailPanel" Padding="16,10,16,10" RowSpacing="6" Visibility="Collapsed">
@@ -254,22 +311,44 @@
                             </StackPanel>
                             <SelectorBar x:Name="DetailTabs" Grid.Column="2" SelectionChanged="DetailTabs_SelectionChanged">
                                 <SelectorBarItem x:Name="GeneralTab" IsSelected="True" />
+                                <SelectorBarItem x:Name="DataTab" />
                                 <SelectorBarItem x:Name="XmlTab" />
                             </SelectorBar>
-                            <Button x:Name="CopyDetailButton" Grid.Column="3" VerticalAlignment="Center" Click="CopyDetail_Click">
+                            <SplitButton x:Name="CopyDetailButton" Grid.Column="3" VerticalAlignment="Center" Click="CopyDetail_Click">
                                 <FontIcon Glyph="&#xE8C8;" FontSize="14" />
-                            </Button>
+                                <SplitButton.Flyout>
+                                    <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                        <MenuFlyoutItem x:Name="CopyAllDetailsItem" Click="CopyAllDetails_Click" />
+                                        <MenuFlyoutItem x:Name="CopyMessageOnlyItem" Click="CopyMessageOnly_Click" />
+                                        <MenuFlyoutItem x:Name="CopyXmlOnlyItem" Click="CopyXmlOnly_Click" />
+                                    </MenuFlyout>
+                                </SplitButton.Flyout>
+                            </SplitButton>
                         </Grid>
-                        <Grid x:Name="GeneralView" Grid.Row="1" ColumnSpacing="24">
+                        <Grid x:Name="GeneralView" Grid.Row="1">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="400" />
+                                <ColumnDefinition Width="*" MinWidth="180" />
+                                <ColumnDefinition Width="6" />
+                                <ColumnDefinition x:Name="FieldsColumn" Width="400" MinWidth="220" />
                             </Grid.ColumnDefinitions>
                             <ScrollViewer VerticalScrollBarVisibility="Auto">
                                 <TextBlock x:Name="MessageText" TextWrapping="Wrap" IsTextSelectionEnabled="True" Padding="0,4,12,8" />
                             </ScrollViewer>
-                            <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
+                            <local:PaneSplitter x:Name="FieldsSplitter" Grid.Column="1" Orientation="Vertical" />
+                            <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto" Padding="10,0,0,0">
                                 <Grid x:Name="FieldsGrid" RowSpacing="3" Padding="0,4,12,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                </Grid>
+                            </ScrollViewer>
+                        </Grid>
+                        <Grid x:Name="DataView" Grid.Row="1" Visibility="Collapsed">
+                            <TextBlock x:Name="DataEmptyText" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <Grid x:Name="DataFieldsGrid" RowSpacing="4" Padding="0,4,12,8">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />

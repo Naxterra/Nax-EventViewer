@@ -69,6 +69,7 @@ internal static class ReaderTests
                 Check.That(detail.Error is null, "the event must be found: " + detail.Error);
                 Check.That(detail.Xml is not null && detail.Xml.Contains($"<EventRecordID>{middle.RecordId}</EventRecordID>"), "the XML belongs to the selected event");
                 Check.That(!string.IsNullOrWhiteSpace(detail.Message), "the detail has a message");
+                Check.That(detail.Data is not null, "the detail includes the extracted data collection");
             });
 
         yield return ("live_log_event_is_found_again_by_record_number",
@@ -316,6 +317,21 @@ internal static class ReaderTests
                 ReadSummary summary = EventReader.ReadRecords(LogSource.ForFile(missing), _ => { }, CancellationToken.None);
                 Check.Equal(0, summary.Count);
                 Check.That(summary.Problems.Count == 1, "one problem is reported");
+            });
+
+        yield return ("second_pass_formats_multiple_events_with_duplicate_keys",
+            "When two events share the same EventKey (such as RecordId 0 in an analytic log), the message pass formats every matching event rather than dropping duplicates.",
+            () =>
+            {
+                LogSource source = LogSource.ForFile(Fixtures.ApplicationLogFile);
+                List<EventItem> real = ReadAll(Fixtures.ApplicationLogFile, out _);
+                Check.That(real.Count >= 1, "the fixture needs an event");
+                EventItem a = Copy(real[0]);
+                EventItem b = Copy(real[0]);
+                Check.Equal(a.Key, b.Key);
+                var formatted = new List<EventItem>();
+                EventReader.FormatMessages(source, [a, b], new MessageStore(), batch => formatted.AddRange(batch.Select(m => m.Item)), CancellationToken.None);
+                Check.That(formatted.Count >= 1 && formatted.Contains(a), "the matching item in a duplicate-key bucket is formatted");
             });
     }
 

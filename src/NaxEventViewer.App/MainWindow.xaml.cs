@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Security.Principal;
 using System.Text;
 using Microsoft.UI.Dispatching;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
@@ -14,14 +15,15 @@ using Microsoft.Windows.Storage.Pickers;
 using NaxEventViewer.Core;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Graphics;
+using Windows.Storage;
 using VirtualKey = Windows.System.VirtualKey;
 
 namespace NaxEventViewer.App;
 
 public sealed partial class MainWindow : Window
 {
-    private static readonly TimeSpan OverviewWindow = TimeSpan.FromHours(24);
     private static readonly TimeSpan?[] TimeChoices = [null, TimeSpan.FromHours(1), TimeSpan.FromHours(24), TimeSpan.FromDays(7), TimeSpan.FromDays(30)];
+    private const int CustomTimeIndex = 5;
     private static readonly EventLevelKind[] AllLevels = Enum.GetValues<EventLevelKind>();
 
     // Events of the current source in arrival order, and the filtered, sorted subset the list shows.
@@ -31,13 +33,19 @@ public sealed partial class MainWindow : Window
     private readonly Dictionary<EventLevelKind, ToggleButton> _levelButtons = [];
     private readonly int[] _levelCounts = new int[AllLevels.Length];
     private readonly Dictionary<string, string> _accountNames = [];
+    private readonly HashSet<string> _includedSources = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _excludedSources = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ColumnWidths _columns;
     private readonly DispatcherQueueTimer _tick;
     private readonly DispatcherQueueTimer _filterDelay;
+    private readonly DispatcherQueueTimer _treeFilterDelay;
     private readonly DispatcherQueueTimer _clockTimer;
     private readonly Stopwatch _loadWatch = new();
     private readonly Stopwatch _lastRebuild = Stopwatch.StartNew();
     private readonly bool _isElevated;
 
+    private LogNode _overviewNode = null!;
+    private LogNode _windowsLogsFolder = null!;
     private LogNode _servicesFolder = null!;
     private LogNode? _filesFolder;
     private List<ChannelInfo>? _channelInfos;
@@ -48,10 +56,16 @@ public sealed partial class MainWindow : Window
     private EventFilter _filter = EventFilter.All;
     private EventComparer _comparer = new(SortColumn.Time, descending: true);
     private TimeSpan? _timeWindow;
+    private DateTime? _customSinceUtc;
+    private DateTime? _customUntilUtc;
+    private int _lastTimeIndex;
+    private bool _suppressFilterEvents;
     private ConcurrentQueue<EventItem> _livePending = new();
     private MessageStore _messages = new();
     private int _liveWakeQueued;
     private int _loadVersion;
+    private int _droppedSinceCompact;
+    private bool _compactingMessages;
     private bool _viewDirty;
     private bool _rebuilding;
     private bool _rebuildRunning;
@@ -70,16 +84,20 @@ public sealed partial class MainWindow : Window
     private TimeSpan _recordsElapsed;
     private EventItem? _detailItem;
     private EventDetail? _detail;
+    private string? _detailUser;
     private int _detailVersion;
 
     public MainWindow()
     {
         InitializeComponent();
+        _columns = (ColumnWidths)Application.Current.Resources["ColumnWidths"];
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
         SystemBackdrop = new MicaBackdrop();
-        AppWindow.Resize(new SizeInt32(1600, 940));
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "Nax-EventViewer.ico"));
+
+        ApplySavedLayout();
+        WireSplitters();
 
         _isElevated = new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
         ElevationText.Visibility = _isElevated ? Visibility.Visible : Visibility.Collapsed;
@@ -88,6 +106,7 @@ public sealed partial class MainWindow : Window
         EventList.ItemsSource = _view;
         LogTree.ItemsSource = _roots;
         LocalizeStaticText();
+        ShowAllLogsBox.IsChecked = Program.Settings.ShowAllLogs;
         CreateLevelButtons();
         UpdateSortHeaders();
 
@@ -98,6 +117,10 @@ public sealed partial class MainWindow : Window
         _filterDelay.Interval = TimeSpan.FromMilliseconds(200);
         _filterDelay.IsRepeating = false;
         _filterDelay.Tick += (_, _) => ApplyFilter();
+        _treeFilterDelay = DispatcherQueue.CreateTimer();
+        _treeFilterDelay.Interval = TimeSpan.FromMilliseconds(180);
+        _treeFilterDelay.IsRepeating = false;
+        _treeFilterDelay.Tick += (_, _) => RebuildServicesTree();
         // A "last hour" filter moves along with the clock, and a watched log drops events the log itself overwrote.
         _clockTimer = DispatcherQueue.CreateTimer();
         _clockTimer.Interval = TimeSpan.FromMinutes(1);
@@ -112,8 +135,95 @@ public sealed partial class MainWindow : Window
         BuildTree();
         LoadChannelInfoInBackground();
         OpenStartupTarget(Program.Startup);
-        AppWindow.Closing += (_, args) => args.Cancel = RefuseWhileClearing();
+        AppWindow.Closing += (_, args) =>
+        {
+            if (RefuseWhileClearing())
+            {
+                args.Cancel = true;
+                return;
+            }
+            if (!_skipSaveLayoutOnClose) SaveWindowLayout();
+        };
         Closed += (_, _) => OnClosed();
+    }
+
+    private void ApplySavedLayout()
+    {
+        AppSettings settings = Program.Settings;
+        AppWindow.Resize(new SizeInt32(settings.WindowWidth, settings.WindowHeight));
+        if (settings.WindowMaximized && AppWindow.Presenter is OverlappedPresenter presenter)
+            presenter.Maximize();
+
+        TreeColumn.Width = new GridLength(settings.TreePaneWidth);
+        DetailRow.Height = new GridLength(settings.DetailPaneHeight);
+        FieldsColumn.Width = new GridLength(settings.FieldsPaneWidth);
+        _columns.Level = new GridLength(settings.LevelColumnWidth);
+        _columns.Time = new GridLength(settings.TimeColumnWidth);
+        _columns.SavedLogWidth = settings.LogColumnWidth;
+        _columns.Source = new GridLength(settings.SourceColumnWidth);
+        _columns.EventId = new GridLength(settings.EventIdColumnWidth);
+        _columns.Task = new GridLength(settings.TaskColumnWidth);
+    }
+
+    private bool _skipSaveLayoutOnClose;
+
+    private void CaptureWindowLayout()
+    {
+        AppSettings settings = Program.Settings;
+        bool maximized = AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Maximized };
+        settings.WindowMaximized = maximized;
+        if (!maximized)
+        {
+            SizeInt32 size = AppWindow.Size;
+            if (size.Width >= 800 && size.Height >= 560)
+            {
+                settings.WindowWidth = size.Width;
+                settings.WindowHeight = size.Height;
+            }
+        }
+        settings.TreePaneWidth = TreeColumn.Width.Value;
+        settings.DetailPaneHeight = DetailRow.Height.Value;
+        settings.FieldsPaneWidth = FieldsColumn.Width.Value;
+        settings.LevelColumnWidth = _columns.Level.Value;
+        settings.TimeColumnWidth = _columns.Time.Value;
+        settings.LogColumnWidth = _columns.SavedLogWidth;
+        settings.SourceColumnWidth = _columns.Source.Value;
+        settings.EventIdColumnWidth = _columns.EventId.Value;
+        settings.TaskColumnWidth = _columns.Task.Value;
+    }
+
+    private void SaveWindowLayout()
+    {
+        CaptureWindowLayout();
+        Program.Settings.TrySave();
+    }
+
+    private void WireSplitters()
+    {
+        TreeSplitter.DragDelta += delta => TreeColumn.Width = new GridLength(Math.Clamp(TreeColumn.ActualWidth + delta, 180, 700));
+        TreeSplitter.ResetRequested += () => { TreeColumn.Width = new GridLength(300); SaveWindowLayout(); };
+        TreeSplitter.DragCompleted += SaveWindowLayout;
+
+        DetailSplitter.DragDelta += delta => DetailRow.Height = new GridLength(Math.Clamp(DetailRow.ActualHeight - delta, 140, 1000));
+        DetailSplitter.ResetRequested += () => { DetailRow.Height = new GridLength(340); SaveWindowLayout(); };
+        DetailSplitter.DragCompleted += SaveWindowLayout;
+
+        FieldsSplitter.DragDelta += delta => FieldsColumn.Width = new GridLength(Math.Clamp(FieldsColumn.ActualWidth - delta, 220, 900));
+        FieldsSplitter.ResetRequested += () => { FieldsColumn.Width = new GridLength(400); SaveWindowLayout(); };
+        FieldsSplitter.DragCompleted += SaveWindowLayout;
+
+        void WireColumn(PaneSplitter splitter, Func<double> get, Action<double> set, double min, double max, double fallback)
+        {
+            splitter.DragDelta += delta => set(Math.Clamp(get() + delta, min, max));
+            splitter.ResetRequested += () => { set(fallback); SaveWindowLayout(); };
+            splitter.DragCompleted += SaveWindowLayout;
+        }
+        WireColumn(LevelColSplitter, () => _columns.Level.Value, v => _columns.Level = new GridLength(v), 90, 400, 156);
+        WireColumn(TimeColSplitter, () => _columns.Time.Value, v => _columns.Time = new GridLength(v), 110, 400, 164);
+        WireColumn(LogColSplitter, () => _columns.SavedLogWidth, v => _columns.SavedLogWidth = v, 100, 500, 170);
+        WireColumn(SourceColSplitter, () => _columns.Source.Value, v => _columns.Source = new GridLength(v), 100, 600, 230);
+        WireColumn(EventIdColSplitter, () => _columns.EventId.Value, v => _columns.EventId = new GridLength(v), 56, 200, 72);
+        WireColumn(TaskColSplitter, () => _columns.Task.Value, v => _columns.Task = new GridLength(v), 80, 500, 140);
     }
 
     /// <summary>
@@ -140,6 +250,7 @@ public sealed partial class MainWindow : Window
         _closed = true;
         _tick.Stop();
         _filterDelay.Stop();
+        _treeFilterDelay.Stop();
         _clockTimer.Stop();
         StopLoading();
     }
@@ -149,10 +260,16 @@ public sealed partial class MainWindow : Window
     {
         ElevationText.Text = Loc.Get("Elevation_Administrator");
         SearchBox.PlaceholderText = Loc.Get("Search_Placeholder");
+        ToolTipService.SetToolTip(SearchBox, Loc.Get("Search_ToolTip"));
         EventIdBox.PlaceholderText = Loc.Get("EventIds_Placeholder");
         ToolTipService.SetToolTip(EventIdBox, Loc.Get("EventIds_ToolTip"));
-        foreach (string key in new[] { "Time_Any", "Time_Hour", "Time_Day", "Time_Week", "Time_Month" }) TimeBox.Items.Add(Loc.Get(key));
+        _suppressFilterEvents = true;
+        foreach (string key in new[] { "Time_Any", "Time_Hour", "Time_Day", "Time_Week", "Time_Month", "Time_Custom" })
+            TimeBox.Items.Add(Loc.Get(key));
         TimeBox.SelectedIndex = 0;
+        _suppressFilterEvents = false;
+        ResetFilterText.Text = Loc.Get("Filter_Reset");
+        ToolTipService.SetToolTip(ResetFilterButton, Loc.Get("Filter_ResetTip"));
 
         void Command(AppBarButton button, string label, string? tip = null)
         {
@@ -170,6 +287,11 @@ public sealed partial class MainWindow : Window
         Command(ClearButton, "Command_Clear", "Command_ClearTip");
         Command(AdminButton, "Command_Admin", "Command_AdminTip");
         Command(SettingsButton, "Command_Settings");
+        OverviewWindowMenu.Text = Loc.Get("Overview_WindowMenu");
+        Overview1hItem.Text = Loc.Get("Overview_1h");
+        Overview24hItem.Text = Loc.Get("Overview_24h");
+        Overview7dItem.Text = Loc.Get("Overview_7d");
+        Overview30dItem.Text = Loc.Get("Overview_30d");
         LanguageMenu.Text = Loc.Get("Settings_Language");
         LanguageSystemItem.Text = Loc.Get("Language_System");
         LanguageEnglishItem.Text = Loc.Get("Language_English");
@@ -177,18 +299,30 @@ public sealed partial class MainWindow : Window
         ReplaceItem.Text = Loc.Get("Settings_Replace");
 
         ProblemAdminButton.Content = Loc.Get("Problem_RestartAdmin");
+        TreeSearchBox.PlaceholderText = Loc.Get("Tree_SearchPlaceholder");
         ShowAllLogsBox.Content = Loc.Get("Tree_ShowAll");
         MessageHeader.Text = Loc.Get("Column_Message");
         DetailEmptyText.Text = Loc.Get("Detail_SelectEvent");
         GeneralTab.Text = Loc.Get("Detail_General");
+        DataTab.Text = Loc.Get("Detail_Data");
+        DataEmptyText.Text = Loc.Get("Detail_NoData");
         XmlTab.Text = Loc.Get("Detail_Xml");
         ToolTipService.SetToolTip(CopyDetailButton, Loc.Get("Detail_CopyTip"));
+        CopyAllDetailsItem.Text = Loc.Get("Detail_CopyAll");
+        CopyMessageOnlyItem.Text = Loc.Get("Detail_CopyMessage");
+        CopyXmlOnlyItem.Text = Loc.Get("Detail_CopyXml");
     }
 
     // ----- Settings -----
 
     private void SettingsMenu_Opening(object sender, object e)
     {
+        int hours = Program.Settings.OverviewHours;
+        Overview1hItem.IsChecked = hours == 1;
+        Overview24hItem.IsChecked = hours == 24;
+        Overview7dItem.IsChecked = hours == 168;
+        Overview30dItem.IsChecked = hours == 720;
+
         string language = Program.Settings.Language;
         LanguageSystemItem.IsChecked = language is not (AppSettings.English or AppSettings.German);
         LanguageEnglishItem.IsChecked = language == AppSettings.English;
@@ -201,6 +335,34 @@ public sealed partial class MainWindow : Window
         ToolTipService.SetToolTip(ReplaceItem, ReplaceItem.IsEnabled ? null : CoreText.Get("Replace_NeedsMachineInstall"));
     }
 
+    private void OverviewWindow_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not RadioMenuFlyoutItem { Tag: string raw } || !int.TryParse(raw, NumberStyles.None, CultureInfo.InvariantCulture, out int hours)) return;
+        if (hours == Program.Settings.OverviewHours) return;
+        Program.Settings.OverviewHours = hours;
+        Program.Settings.TrySave();
+        UpdateOverviewNodeLabel();
+        if (_source?.Kind == LogSourceKind.ProblemsOverview) Open(CreateOverviewSource());
+    }
+
+    private string OverviewWindowLabel() => Program.Settings.OverviewHours switch
+    {
+        1 => Loc.Get("Overview_1h"),
+        168 => Loc.Get("Overview_7d"),
+        720 => Loc.Get("Overview_30d"),
+        _ => Loc.Get("Overview_24h"),
+    };
+
+    private void UpdateOverviewNodeLabel()
+    {
+        int index = _roots.IndexOf(_overviewNode);
+        if (index < 0) return;
+        bool wasSelected = LogTree.SelectedItem == _overviewNode;
+        _overviewNode = new LogNode(LogNodeKind.Overview, Loc.F("Tree_OverviewRange", OverviewWindowLabel()));
+        _roots[index] = _overviewNode;
+        if (wasSelected) LogTree.SelectedItem = _overviewNode;
+    }
+
     /// <summary>Saves the chosen language and restarts the app in it, on the same log.</summary>
     private void Language_Click(object sender, RoutedEventArgs e)
     {
@@ -208,6 +370,7 @@ public sealed partial class MainWindow : Window
         string previous = Program.Settings.Language;
         try
         {
+            CaptureWindowLayout();
             Program.Settings.Language = language;
             Program.Settings.Save();
         }
@@ -223,8 +386,12 @@ public sealed partial class MainWindow : Window
         foreach (string argument in StartupArguments.For(_source)) start.ArgumentList.Add(argument);
         try
         {
-            Process.Start(start);
-            Close();
+            using Process? started = Process.Start(start);
+            if (started is not null)
+            {
+                _skipSaveLayoutOnClose = true;
+                Close();
+            }
         }
         catch (System.ComponentModel.Win32Exception ex)
         {
@@ -250,7 +417,7 @@ public sealed partial class MainWindow : Window
             int exitCode;
             try
             {
-                using Process helper = Process.Start(start)!;
+                using Process helper = Process.Start(start) ?? throw new InvalidOperationException(Loc.Get("Replace_Cancelled"));
                 await helper.WaitForExitAsync();
                 exitCode = helper.ExitCode;
                 if (_closed) return;
@@ -272,15 +439,60 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    // ----- Drag and drop -----
+
+    private void Root_DragOver(object sender, DragEventArgs e)
+    {
+        if (e.DataView.Contains(StandardDataFormats.StorageItems))
+        {
+            e.AcceptedOperation = DataPackageOperation.Copy;
+            e.DragUIOverride.Caption = Loc.Get("Drop_OpenEvtx");
+            e.DragUIOverride.IsCaptionVisible = true;
+            e.DragUIOverride.IsGlyphVisible = true;
+        }
+    }
+
+    private async void Root_Drop(object sender, DragEventArgs e)
+    {
+        DragOperationDeferral? deferral = null;
+        try
+        {
+            if (!e.DataView.Contains(StandardDataFormats.StorageItems)) return;
+            deferral = e.GetDeferral();
+            IReadOnlyList<IStorageItem> items = await e.DataView.GetStorageItemsAsync();
+            if (_closed) return;
+            string? lastOpened = null;
+            foreach (IStorageItem item in items)
+            {
+                if (item is StorageFile file && file.Path.EndsWith(".evtx", StringComparison.OrdinalIgnoreCase))
+                {
+                    AddFileNode(file.Path);
+                    lastOpened = file.Path;
+                }
+            }
+            if (lastOpened is not null) OpenFile(lastOpened);
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write(ex);
+            ShowProblem(Loc.F("Problem_OpenFailed", ex.Message), offerAdmin: false);
+        }
+        finally
+        {
+            deferral?.Complete();
+        }
+    }
+
     // ----- Log tree -----
 
     private void BuildTree()
     {
-        _roots.Add(new LogNode(LogNodeKind.Overview, Loc.Get("Tree_Overview")));
-        var windowsLogs = new LogNode(LogNodeKind.Folder, Loc.Get("Tree_WindowsLogs")) { IsExpanded = true };
+        _overviewNode = new LogNode(LogNodeKind.Overview, Loc.F("Tree_OverviewRange", OverviewWindowLabel()));
+        _roots.Add(_overviewNode);
+        _windowsLogsFolder = new LogNode(LogNodeKind.Folder, Loc.Get("Tree_WindowsLogs")) { IsExpanded = true };
         foreach (string channel in ChannelCatalog.WindowsLogs)
-            windowsLogs.Children.Add(new LogNode(LogNodeKind.Channel, channel, channel));
-        _roots.Add(windowsLogs);
+            _windowsLogsFolder.Children.Add(new LogNode(LogNodeKind.Channel, channel, channel));
+        _roots.Add(_windowsLogsFolder);
         _servicesFolder = new LogNode(LogNodeKind.Folder, Loc.Get("Tree_Services"));
         _servicesFolder.Children.Add(new LogNode(LogNodeKind.Folder, Loc.Get("Tree_Loading")));
         _roots.Add(_servicesFolder);
@@ -312,34 +524,60 @@ public sealed partial class MainWindow : Window
         }, TaskScheduler.Default);
     }
 
+    private void TreeSearch_Changed(object sender, TextChangedEventArgs e)
+    {
+        _treeFilterDelay.Stop();
+        _treeFilterDelay.Start();
+    }
+
     private void RebuildServicesTree()
     {
         if (_channelInfos is null) return;
+        string search = TreeSearchBox.Text.Trim();
+        bool filtering = search.Length > 0;
         bool showAll = ShowAllLogsBox.IsChecked == true;
+        var expanded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        CollectExpanded(_servicesFolder, "", expanded);
+
         var infoByName = _channelInfos.ToDictionary(i => i.Name, StringComparer.OrdinalIgnoreCase);
 
-        LogNode windowsLogs = _roots[1];
-        windowsLogs.Children.Clear();
+        _windowsLogsFolder.Children.Clear();
         foreach (string channel in ChannelCatalog.WindowsLogs)
         {
             infoByName.TryGetValue(channel, out ChannelInfo? info);
-            if (!showAll && channel == "ForwardedEvents" && info?.RecordCount is null or 0) continue;
-            windowsLogs.Children.Add(new LogNode(LogNodeKind.Channel, channel, channel) { CountText = LogNode.FormatCount(info?.RecordCount) });
+            if (!filtering && !showAll && channel == "ForwardedEvents" && info?.RecordCount is null or 0) continue;
+            if (filtering && !channel.Contains(search, StringComparison.OrdinalIgnoreCase)) continue;
+            _windowsLogsFolder.Children.Add(new LogNode(LogNodeKind.Channel, channel, channel) { CountText = LogNode.FormatCount(info?.RecordCount) });
         }
 
         var shown = _channelInfos.Where(i => !ChannelCatalog.WindowsLogs.Contains(i.Name, StringComparer.OrdinalIgnoreCase)
-            && (showAll || (!i.IsAnalyticOrDebug && i.RecordCount is not 0)));
+            && (showAll || (!i.IsAnalyticOrDebug && i.RecordCount is not 0))
+            && (!filtering || i.Name.Contains(search, StringComparison.OrdinalIgnoreCase)));
         ChannelFolder tree = ChannelTree.Build(shown.Select(i => i.Name));
         _servicesFolder.Children.Clear();
-        AddFolderContents(_servicesFolder, tree, infoByName);
+        AddFolderContents(_servicesFolder, tree, infoByName, "", expanded, expandAll: filtering);
+        if (filtering && _servicesFolder.Children.Count > 0) _servicesFolder.IsExpanded = true;
+        SyncTreeSelection(_source);
     }
 
-    private static void AddFolderContents(LogNode node, ChannelFolder folder, Dictionary<string, ChannelInfo> infoByName)
+    private static void CollectExpanded(LogNode folder, string prefix, HashSet<string> result)
+    {
+        foreach (LogNode child in folder.Children)
+        {
+            if (child.Kind != LogNodeKind.Folder) continue;
+            string key = prefix.Length == 0 ? child.Name : prefix + "/" + child.Name;
+            if (child.IsExpanded) result.Add(key);
+            CollectExpanded(child, key, result);
+        }
+    }
+
+    private static void AddFolderContents(LogNode node, ChannelFolder folder, Dictionary<string, ChannelInfo> infoByName, string prefix, HashSet<string> expanded, bool expandAll)
     {
         foreach (ChannelFolder child in folder.Folders)
         {
-            var childNode = new LogNode(LogNodeKind.Folder, child.Name);
-            AddFolderContents(childNode, child, infoByName);
+            string key = prefix.Length == 0 ? child.Name : prefix + "/" + child.Name;
+            var childNode = new LogNode(LogNodeKind.Folder, child.Name) { IsExpanded = expandAll || expanded.Contains(key) };
+            AddFolderContents(childNode, child, infoByName, key, expanded, expandAll);
             node.Children.Add(childNode);
         }
         foreach (var (name, channel) in folder.Channels)
@@ -349,7 +587,40 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void ShowAllLogs_Click(object sender, RoutedEventArgs e) => RebuildServicesTree();
+    private void SyncTreeSelection(LogSource? source)
+    {
+        if (source is null) return;
+        LogNode? target = source.Kind switch
+        {
+            LogSourceKind.ProblemsOverview => _overviewNode,
+            LogSourceKind.Channel => FindChannelNode(_roots, source.Path, expandParents: true),
+            LogSourceKind.File => _filesFolder?.Children.FirstOrDefault(n => string.Equals(n.Path, source.Path, StringComparison.OrdinalIgnoreCase)),
+            _ => null,
+        };
+        if (target is not null && LogTree.SelectedItem != target)
+            LogTree.SelectedItem = target;
+    }
+
+    private static LogNode? FindChannelNode(IEnumerable<LogNode> nodes, string channel, bool expandParents)
+    {
+        foreach (LogNode node in nodes)
+        {
+            if (node.Kind == LogNodeKind.Channel && string.Equals(node.Path, channel, StringComparison.OrdinalIgnoreCase)) return node;
+            if (FindChannelNode(node.Children, channel, expandParents) is { } found)
+            {
+                if (expandParents && node.Kind == LogNodeKind.Folder) node.IsExpanded = true;
+                return found;
+            }
+        }
+        return null;
+    }
+
+    private void ShowAllLogs_Click(object sender, RoutedEventArgs e)
+    {
+        Program.Settings.ShowAllLogs = ShowAllLogsBox.IsChecked == true;
+        Program.Settings.TrySave();
+        RebuildServicesTree();
+    }
 
     private void LogTree_ItemInvoked(TreeView sender, TreeViewItemInvokedEventArgs args)
     {
@@ -371,7 +642,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>The right-click menu of a log, a saved file or the overview. Folders have none.</summary>
+    /// <summary>The right-click menu of a log, a saved file, a folder, or the overview.</summary>
     private void LogTree_ContextRequested(UIElement sender, ContextRequestedEventArgs args)
     {
         if (FindAncestor<TreeViewItem>(args.OriginalSource as DependencyObject)?.DataContext is not LogNode node) return;
@@ -381,34 +652,35 @@ public sealed partial class MainWindow : Window
             case LogNodeKind.Channel:
                 // Saving and clearing act on the log that was right-clicked, which need not be the open one.
                 LogSource source = SourceForChannel(node.Path);
-                menu.Items.Add(MenuItem("Menu_Open", "", (_, _) => Open(SourceForChannel(node.Path))));
-                menu.Items.Add(MenuItem("Menu_SaveEvtx", "", SaveEvtx_Click, source));
-                menu.Items.Add(MenuItem("Menu_ClearLog", "", Clear_Click, new ClearRequest(source.DisplayName, [source], IsFolder: false), enabled: !_clearing));
+                menu.Items.Add(MenuItem("Menu_Open", "\uE8E5", (_, _) => Open(SourceForChannel(node.Path))));
+                menu.Items.Add(MenuItem("Menu_SaveEvtx", "\uE74E", SaveEvtx_Click, source));
+                menu.Items.Add(MenuItem("Menu_ClearLog", "\uE74D", Clear_Click, new ClearRequest(source.DisplayName, [source], IsFolder: false), enabled: !_clearing));
                 menu.Items.Add(new MenuFlyoutSeparator());
-                menu.Items.Add(MenuItem("Menu_CopyLogName", "", (_, _) => CopyText(node.Path)));
+                menu.Items.Add(MenuItem("Menu_CopyLogName", "\uE8C8", (_, _) => CopyText(node.Path)));
                 break;
             case LogNodeKind.File:
-                menu.Items.Add(MenuItem("Menu_Open", "", (_, _) => Open(LogSource.ForFile(node.Path))));
+                menu.Items.Add(MenuItem("Menu_Open", "\uE8E5", (_, _) => Open(LogSource.ForFile(node.Path))));
+                menu.Items.Add(MenuItem("Menu_CloseFile", "\uE711", (_, _) => RemoveFileNode(node)));
                 menu.Items.Add(new MenuFlyoutSeparator());
-                menu.Items.Add(MenuItem("Menu_CopyPath", "", (_, _) => CopyText(node.Path)));
-                menu.Items.Add(MenuItem("Menu_ShowInFolder", "", (_, _) => ShowInFolder(node.Path)));
+                menu.Items.Add(MenuItem("Menu_CopyPath", "\uE8C8", (_, _) => CopyText(node.Path)));
+                menu.Items.Add(MenuItem("Menu_ShowInFolder", "\uED25", (_, _) => ShowInFolder(node.Path)));
                 break;
             case LogNodeKind.Overview:
-                menu.Items.Add(MenuItem("Menu_Open", "", (_, _) => Open(CreateOverviewSource())));
+                menu.Items.Add(MenuItem("Menu_Open", "\uE8E5", (_, _) => Open(CreateOverviewSource())));
                 break;
             case LogNodeKind.Folder when node.Children.Count > 0:
                 menu.Items.Add(node.IsExpanded
-                    ? MenuItem("Menu_Collapse", "", (_, _) => node.IsExpanded = false)
-                    : MenuItem("Menu_Expand", "", (_, _) => node.IsExpanded = true));
-                menu.Items.Add(MenuItem("Menu_ExpandAll", "", (_, _) => SetExpanded(node, true)));
-                menu.Items.Add(MenuItem("Menu_CollapseAll", "", (_, _) => SetExpanded(node, false)));
+                    ? MenuItem("Menu_Collapse", "\uE70E", (_, _) => node.IsExpanded = false)
+                    : MenuItem("Menu_Expand", "\uE70D", (_, _) => node.IsExpanded = true));
+                menu.Items.Add(MenuItem("Menu_ExpandAll", "\uE70D", (_, _) => SetExpanded(node, true)));
+                menu.Items.Add(MenuItem("Menu_CollapseAll", "\uE70E", (_, _) => SetExpanded(node, false)));
                 // Clearing a folder covers the logs the tree shows in it, at every level below.
                 List<LogSource> folderLogs = [.. Descendants(node).Where(n => n.Kind == LogNodeKind.Channel)
                     .Select(n => n.Path).Distinct(StringComparer.OrdinalIgnoreCase).Select(SourceForChannel)];
                 if (folderLogs.Count > 0)
                 {
                     menu.Items.Add(new MenuFlyoutSeparator());
-                    menu.Items.Add(MenuItem("Menu_ClearFolder", "", Clear_Click, new ClearRequest(node.Name, folderLogs, IsFolder: true), enabled: !_clearing));
+                    menu.Items.Add(MenuItem("Menu_ClearFolder", "\uE74D", Clear_Click, new ClearRequest(node.Name, folderLogs, IsFolder: true), enabled: !_clearing));
                 }
                 break;
             default:
@@ -416,6 +688,19 @@ public sealed partial class MainWindow : Window
         }
         args.Handled = true;
         ShowMenu(menu, sender, args);
+    }
+
+    private void RemoveFileNode(LogNode node)
+    {
+        if (_filesFolder is null) return;
+        _filesFolder.Children.Remove(node);
+        if (_filesFolder.Children.Count == 0)
+        {
+            _roots.Remove(_filesFolder);
+            _filesFolder = null;
+        }
+        if (_source is { Kind: LogSourceKind.File } open && string.Equals(open.Path, node.Path, StringComparison.OrdinalIgnoreCase))
+            Open(LogSource.ForChannel("System"));
     }
 
     private static IEnumerable<LogNode> Descendants(LogNode node)
@@ -445,7 +730,8 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = false });
+            string explorer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
+            using Process? process = Process.Start(new ProcessStartInfo(explorer, $"/select,\"{path}\"") { UseShellExecute = false });
         }
         catch (Exception ex)
         {
@@ -453,7 +739,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>Reads the number of events of a log again and shows it in the tree, after the log was cleared.</summary>
+    /// <summary>Reads the number of events of a log again and updates both the tree and cached channel metadata.</summary>
     private void RecountLog(string channel)
     {
         Task.Run(() => ChannelCatalog.CountRecords(channel)).ContinueWith(task =>
@@ -462,7 +748,13 @@ public sealed partial class MainWindow : Window
             DispatcherQueue.TryEnqueue(() =>
             {
                 if (_closed) return;
-                foreach (LogNode node in ChannelNodes(_roots, channel)) node.CountText = LogNode.FormatCount(task.Result);
+                long? updated = task.Result;
+                if (_channelInfos is not null)
+                {
+                    int index = _channelInfos.FindIndex(i => string.Equals(i.Name, channel, StringComparison.OrdinalIgnoreCase));
+                    if (index >= 0) _channelInfos[index] = _channelInfos[index] with { RecordCount = updated };
+                }
+                foreach (LogNode node in ChannelNodes(_roots, channel)) node.CountText = LogNode.FormatCount(updated);
             });
         }, TaskScheduler.Default);
     }
@@ -508,7 +800,7 @@ public sealed partial class MainWindow : Window
         IEnumerable<string> channels = ChannelCatalog.WindowsLogs;
         if (_channelInfos is not null)
             channels = channels.Concat(_channelInfos.Where(i => i.Type == ChannelType.Admin && i.Enabled && i.RecordCount is not 0).Select(i => i.Name));
-        return LogSource.ForProblemsOverview(channels.ToList(), OverviewWindow);
+        return LogSource.ForProblemsOverview(channels.ToList(), TimeSpan.FromHours(Program.Settings.OverviewHours));
     }
 
     private void OpenStartupTarget(StartupTarget? target)
@@ -516,7 +808,7 @@ public sealed partial class MainWindow : Window
         switch (target?.Kind)
         {
             case LogSourceKind.File:
-                OpenFile(target.Path);
+                if (!TryOpenFile(target.Path)) Open(LogSource.ForChannel("System"));
                 break;
             case LogSourceKind.ProblemsOverview:
                 Open(CreateOverviewSource());
@@ -530,9 +822,39 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void OpenFile(string path)
+    private void OpenFile(string path) => TryOpenFile(path);
+
+    private bool TryOpenFile(string path)
     {
-        LogSource source = LogSource.ForFile(path);
+        LogSource source;
+        try
+        {
+            source = LogSource.ForFile(path);
+            if (source.DisplayName.Length == 0 || Directory.Exists(source.Path))
+                throw new ArgumentException(CoreText.F("Error_Open", path));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            ShowProblem(Loc.F("Problem_OpenFailed", ex.Message), offerAdmin: false);
+            return false;
+        }
+        AddFileNode(source.Path);
+        Open(source);
+        return true;
+    }
+
+    private void AddFileNode(string path)
+    {
+        LogSource source;
+        try
+        {
+            source = LogSource.ForFile(path);
+            if (source.DisplayName.Length == 0 || Directory.Exists(source.Path)) return;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return;
+        }
         if (_filesFolder is null)
         {
             _filesFolder = new LogNode(LogNodeKind.Folder, Loc.Get("Tree_SavedLogs")) { IsExpanded = true };
@@ -546,9 +868,8 @@ public sealed partial class MainWindow : Window
             Task.Run(() => ChannelCatalog.CountRecords(source.Path, isFile: true)).ContinueWith(task =>
             {
                 if (task.IsCompletedSuccessfully) DispatcherQueue.TryEnqueue(() => { if (!_closed) node.CountText = LogNode.FormatCount(task.Result); });
-            });
+            }, TaskScheduler.Default);
         }
-        Open(source);
     }
 
     // ----- Loading -----
@@ -558,6 +879,8 @@ public sealed partial class MainWindow : Window
         StopLoading();
         _source = source;
         _loadVersion++;
+        _droppedSinceCompact = 0;
+        _compactingMessages = false;
         _livePending = new ConcurrentQueue<EventItem>();
         _viewDirty = false;
         _all.Clear();
@@ -574,12 +897,22 @@ public sealed partial class MainWindow : Window
         _recordsLoading = true;
         _messagesLoading = true;
         _loadWatch.Restart();
-        LogTitle.Text = source.Kind == LogSourceKind.File ? Loc.F("Title_SavedFile", source.DisplayName) : source.DisplayName;
+        _columns.ShowLog = source.Kind == LogSourceKind.ProblemsOverview
+            || string.Equals(source.Path, "ForwardedEvents", StringComparison.OrdinalIgnoreCase);
+        if (!_columns.ShowLog && _comparer.Column == SortColumn.Log)
+        {
+            _comparer = new EventComparer(SortColumn.Time, descending: true);
+            UpdateSortHeaders();
+        }
+        LogTitle.Text = source.Kind == LogSourceKind.File ? Loc.F("Title_SavedFile", source.DisplayName)
+            : source.Kind == LogSourceKind.ProblemsOverview ? Loc.F("Tree_OverviewRange", OverviewWindowLabel())
+            : source.DisplayName;
         Title = $"{source.DisplayName} - Nax Event Viewer";
         SaveEvtxItem.IsEnabled = source.SupportsEvtxExport;
         // Only a single log on this PC can be cleared; a saved file or the overview cannot.
         ClearButton.IsEnabled = source.Kind == LogSourceKind.Channel;
         LiveToggle.IsEnabled = source.SupportsLiveUpdates;
+        SyncTreeSelection(source);
 
         var load = new CancellationTokenSource();
         _load = load;
@@ -708,6 +1041,7 @@ public sealed partial class MainWindow : Window
         }
         catch (EventLogException ex)
         {
+            LiveToggle.IsChecked = false;
             // An earlier problem, such as a read error, explains more than the failed subscription does.
             if (!ProblemBar.IsOpen) ShowProblem(Loc.F("Problem_PressF5", ex.Message), offerAdmin: false);
         }
@@ -726,7 +1060,7 @@ public sealed partial class MainWindow : Window
             // When the running rebuild finishes, it merges the events that arrived after its snapshot if there are only
             // a few and the log has finished loading. Otherwise it marks the view dirty, and the next tick rebuilds it.
         }
-        else if (arrived.Count > 100)
+        else if (arrived.Count > 100 || (_messagesLoading && _comparer.Column == SortColumn.Task))
         {
             _viewDirty = true;
         }
@@ -745,10 +1079,11 @@ public sealed partial class MainWindow : Window
 
     private void OnLiveFailed(string message)
     {
-        // Switching Live off and on again continues after the last event the failed subscription delivered.
+        // Turning Live on again continues after the last event the failed subscription delivered.
         _live?.Dispose();
         _resumeBookmark = _live?.ResumeBookmark ?? _resumeBookmark;
         _live = null;
+        LiveToggle.IsChecked = false;
         ShowProblem(Loc.F("Problem_PressF5", message), offerAdmin: false);
         UpdateStatus();
     }
@@ -760,7 +1095,7 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private async void DropOverwrittenEvents()
     {
-        if (_live is null || _source is not { Kind: LogSourceKind.Channel } source || _recordsLoading) return;
+        if (_live is null || _source is not { Kind: LogSourceKind.Channel } source || _recordsLoading || _messagesLoading) return;
         int version = _loadVersion;
         // Events that arrive while Windows counts are in the log but not yet in this number, so the count errs on keeping events.
         int listed = _all.Count;
@@ -776,7 +1111,8 @@ public sealed partial class MainWindow : Window
             return;
         }
         // A running rebuild remembers how many events it saw, so the list may only shrink between rebuilds.
-        if (inLog is not long count || version != _loadVersion || _rebuildRunning) return;
+        if (inLog is not long count || _live is null || _messagesLoading || version != _loadVersion || _rebuildRunning) return;
+        if (listed <= count) return;
         int excess = (int)Math.Min(listed - count, listed);
         if (excess <= 0) return;
 
@@ -785,8 +1121,44 @@ public sealed partial class MainWindow : Window
         _all.RemoveRange(_readNewestFirst ? _readCount - fromRead : 0, fromRead);
         _readCount -= fromRead;
         _all.RemoveRange(_readCount, Math.Min(excess - fromRead, _all.Count - _readCount));
-        if (!_messagesLoading) _missingMessages = _all.Count(i => !i.HasMessage);
+        _missingMessages = _all.Count(i => !i.HasMessage);
+        _droppedSinceCompact += excess;
         RequestRebuild(keepScroll: true);
+
+        if (!_compactingMessages && (_droppedSinceCompact >= 5_000 || (_droppedSinceCompact >= 1_000 && _droppedSinceCompact >= _all.Count)))
+            CompactMessagesAsync(version);
+    }
+
+    /// <summary>Rebuilds MessageStore in the background so lines from overwritten events are reclaimed during multi-day live runs.</summary>
+    private async void CompactMessagesAsync(int version)
+    {
+        _compactingMessages = true;
+        EventItem[] snapshot = [.. _all];
+        try
+        {
+            (MessageStore fresh, List<(EventItem Item, StoredMessage Message)> remapped) = await Task.Run(() => MessageStore.Compact(snapshot));
+            if (_closed || version != _loadVersion) return;
+            foreach (var (item, stored) in remapped) item.ReplaceStoredMessage(stored);
+            _messages = fresh;
+            _live?.UseStore(fresh);
+            // Drain any live events delivered while compaction ran and remap any items still pointing to the old store.
+            FlushLiveEvents();
+            foreach (EventItem item in _all)
+            {
+                if (fresh.RemapIfDifferent(item) is { } late) item.ReplaceStoredMessage(late);
+            }
+            // Clear cached line-match tables in place so an in-flight RunRebuild keeps its filter reference intact.
+            _filter.ClearLineCache();
+            _droppedSinceCompact = 0;
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write(ex);
+        }
+        finally
+        {
+            _compactingMessages = false;
+        }
     }
 
     private void LiveToggle_Click(object sender, RoutedEventArgs e)
@@ -848,13 +1220,149 @@ public sealed partial class MainWindow : Window
 
     private void FilterText_Changed(object sender, TextChangedEventArgs e)
     {
+        if (_suppressFilterEvents) return;
         _filterDelay.Stop();
         _filterDelay.Start();
     }
 
-    private void TimeBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private async void TimeBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_filterDelay is not null) ApplyFilter();
+        if (_suppressFilterEvents || _filterDelay is null || _closed) return;
+        int index = TimeBox.SelectedIndex;
+        if (index == CustomTimeIndex)
+        {
+            try
+            {
+                bool applied = await PickCustomTimeRangeAsync();
+                if (_closed) return;
+                if (!applied)
+                {
+                    _suppressFilterEvents = true;
+                    TimeBox.SelectedIndex = _lastTimeIndex;
+                    _suppressFilterEvents = false;
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write(ex);
+                if (_closed) return;
+                _suppressFilterEvents = true;
+                TimeBox.SelectedIndex = _lastTimeIndex;
+                _suppressFilterEvents = false;
+                return;
+            }
+        }
+        else
+        {
+            _customSinceUtc = null;
+            _customUntilUtc = null;
+        }
+        _lastTimeIndex = index;
+        ApplyFilter();
+    }
+
+    private async void EditCustomRange_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (await PickCustomTimeRangeAsync() && !_closed) ApplyFilter();
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write(ex);
+        }
+    }
+
+    private async Task<bool> PickCustomTimeRangeAsync()
+    {
+        DateTime now = DateTime.Now;
+        DateTime defaultStart = _customSinceUtc?.ToLocalTime() ?? now.AddHours(-24);
+        DateTime defaultEnd = _customUntilUtc?.ToLocalTime() ?? now;
+
+        var startDate = new DatePicker { Header = Loc.Get("Time_From"), Date = new DateTimeOffset(defaultStart.Date) };
+        var startTime = new TimePicker { Time = new TimeSpan(defaultStart.Hour, defaultStart.Minute, 0) };
+        var endDate = new DatePicker { Header = Loc.Get("Time_To"), Date = new DateTimeOffset(defaultEnd.Date) };
+        var endTime = new TimePicker { Time = new TimeSpan(defaultEnd.Hour, defaultEnd.Minute, 0) };
+        var errorText = new TextBlock
+        {
+            Foreground = LevelVisuals.Brush(EventLevelKind.Error),
+            TextWrapping = TextWrapping.Wrap,
+            Visibility = Visibility.Collapsed,
+        };
+
+        var panel = new StackPanel { Spacing = 8 };
+        panel.Children.Add(startDate);
+        panel.Children.Add(startTime);
+        panel.Children.Add(endDate);
+        panel.Children.Add(endTime);
+        panel.Children.Add(errorText);
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = Loc.Get("Time_CustomTitle"),
+            Content = panel,
+            PrimaryButtonText = Loc.Get("Time_Apply"),
+            CloseButtonText = Loc.Get("Clear_Cancel"),
+            DefaultButton = ContentDialogButton.Primary,
+        };
+        dialog.PrimaryButtonClick += (_, args) =>
+        {
+            DateTime from = startDate.Date.DateTime.Date + new TimeSpan(startTime.Time.Hours, startTime.Time.Minutes, 0);
+            DateTime to = endDate.Date.DateTime.Date + new TimeSpan(endTime.Time.Hours, endTime.Time.Minutes, 0);
+            if (to < from)
+            {
+                errorText.Text = Loc.Get("Time_RangeInvalid");
+                errorText.Visibility = Visibility.Visible;
+                args.Cancel = true;
+            }
+        };
+
+        ContentDialogResult result = await dialog.ShowAsync();
+        if (_closed || result != ContentDialogResult.Primary) return false;
+
+        // TimePicker chooses minute precision, so start begins at :00 and end includes the entire chosen minute (:59.9999999).
+        DateTime chosenStart = DateTime.SpecifyKind(startDate.Date.DateTime.Date + new TimeSpan(startTime.Time.Hours, startTime.Time.Minutes, 0), DateTimeKind.Local);
+        DateTime chosenEnd = DateTime.SpecifyKind(endDate.Date.DateTime.Date + new TimeSpan(endTime.Time.Hours, endTime.Time.Minutes, 59), DateTimeKind.Local)
+            .AddTicks(TimeSpan.TicksPerSecond - 1);
+        _customSinceUtc = chosenStart.ToUniversalTime();
+        _customUntilUtc = chosenEnd.ToUniversalTime();
+        return true;
+    }
+
+    private bool HasActiveFilter() =>
+        SearchBox.Text.Length > 0
+        || EventIdBox.Text.Length > 0
+        || TimeBox.SelectedIndex > 0
+        || _includedSources.Count > 0
+        || _excludedSources.Count > 0
+        || _levelButtons.Values.Any(b => b.IsChecked != true);
+
+    private void UpdateActiveFilterIndicators()
+    {
+        bool filtered = HasActiveFilter();
+        ResetFilterButton.Visibility = filtered ? Visibility.Visible : Visibility.Collapsed;
+
+        bool hasCustomRange = _customSinceUtc is DateTime && _customUntilUtc is DateTime;
+        if (hasCustomRange)
+        {
+            EditCustomRangeText.Text = $"{_customSinceUtc!.Value.ToLocalTime():g} - {_customUntilUtc!.Value.ToLocalTime():g}";
+            EditCustomRangeButton.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            EditCustomRangeButton.Visibility = Visibility.Collapsed;
+        }
+
+        var notes = new List<string>();
+        if (_includedSources.Count > 0) notes.Add(Loc.F("Filter_SourceOnly", string.Join(", ", _includedSources)));
+        if (_excludedSources.Count == 1) notes.Add(Loc.F("Filter_SourceHiddenOne", _excludedSources.First()));
+        else if (_excludedSources.Count > 1) notes.Add(Loc.F("Filter_SourceHiddenMany", Number(_excludedSources.Count)));
+
+        ActiveFilterSummary.Text = string.Join("  |  ", notes);
+        ActiveFilterSummary.Visibility = notes.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        ActiveFilterStrip.Visibility = hasCustomRange || notes.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void ApplyFilter()
@@ -872,17 +1380,35 @@ public sealed partial class MainWindow : Window
         else EventIdBox.BorderBrush = LevelVisuals.Brush(EventLevelKind.Error);
 
         var levels = AllLevels.Where(k => _levelButtons[k].IsChecked == true).ToHashSet();
-        TimeSpan? window = TimeChoices[Math.Clamp(TimeBox.SelectedIndex, 0, TimeChoices.Length - 1)];
-        _timeWindow = window;
+        DateTime? sinceUtc;
+        DateTime? untilUtc = null;
+        if (TimeBox.SelectedIndex == CustomTimeIndex && _customSinceUtc is not null && _customUntilUtc is not null)
+        {
+            _timeWindow = null;
+            sinceUtc = _customSinceUtc;
+            untilUtc = _customUntilUtc;
+        }
+        else
+        {
+            TimeSpan? window = TimeChoices[Math.Clamp(TimeBox.SelectedIndex, 0, TimeChoices.Length - 1)];
+            _timeWindow = window;
+            sinceUtc = window is TimeSpan span ? DateTime.UtcNow - span : null;
+        }
         _filter = new EventFilter
         {
             Text = SearchBox.Text,
             EventIds = ids,
             Levels = levels.Count == AllLevels.Length ? null : levels,
-            SinceUtc = window is TimeSpan span ? DateTime.UtcNow - span : null,
+            SinceUtc = sinceUtc,
+            UntilUtc = untilUtc,
+            IncludedSources = _includedSources.Count > 0 ? new HashSet<string>(_includedSources, StringComparer.OrdinalIgnoreCase) : null,
+            ExcludedSources = _excludedSources.Count > 0 ? new HashSet<string>(_excludedSources, StringComparer.OrdinalIgnoreCase) : null,
         };
+        UpdateActiveFilterIndicators();
         RequestRebuild(keepScroll: false);
     }
+
+    private void ResetFilter_Click(object sender, RoutedEventArgs e) => ResetFilters();
 
     private void ColumnHeader_Click(object sender, RoutedEventArgs e)
     {
@@ -900,8 +1426,9 @@ public sealed partial class MainWindow : Window
         [
             (LevelHeader, SortColumn.Level, Loc.Get("Column_Level")),
             (TimeHeader, SortColumn.Time, Loc.Get("Column_Time")),
+            (LogHeader, SortColumn.Log, Loc.Get("Column_Log")),
             (SourceHeader, SortColumn.Source, Loc.Get("Column_Source")),
-            (EventIdHeader, SortColumn.EventId, "ID"),
+            (EventIdHeader, SortColumn.EventId, Loc.Get("Column_EventId")),
             (TaskHeader, SortColumn.Task, Loc.Get("Column_Task")),
         ];
         foreach (var (button, column, text) in headers)
@@ -956,7 +1483,7 @@ public sealed partial class MainWindow : Window
             _rebuildRunning = false;
             _lastRebuild.Restart();
         }
-        if (_rebuildAgain)
+        if (!_closed && _rebuildAgain)
         {
             _rebuildAgain = false;
             RunRebuild(_rebuildAgainKeepsScroll);
@@ -965,11 +1492,11 @@ public sealed partial class MainWindow : Window
 
     private void ApplyRebuild(List<EventItem> shown, int[] counts, int snapshotLength, bool keepScroll)
     {
-        // Events that arrived while the list was computed. A few live events are merged in here; anything more, or
-        // record batches of a log that is still being read, would make this loop slow on the UI thread, so those
+        // Events that arrived while the list was computed. A few live events are merged in here; anything more,
+        // record batches of a log that is still being read, or live inserts while sorting by changing Task names
         // wait for the next rebuild instead.
         int late = _all.Count - snapshotLength;
-        if (late > MaxMergedLateEvents || _recordsLoading)
+        if (late > MaxMergedLateEvents || _recordsLoading || (_messagesLoading && _comparer.Column == SortColumn.Task))
         {
             if (late > 0)
             {
@@ -1018,6 +1545,7 @@ public sealed partial class MainWindow : Window
         }
         EventItem? current = EventList.SelectedItems.Count == 1 ? EventList.SelectedItem as EventItem : null;
         if (current != _detailItem) ShowDetail(current);
+        else if (current is null) UpdateDetailEmptyText();
         Array.Copy(counts, _levelCounts, counts.Length);
         UpdateLevelButtons();
 
@@ -1031,8 +1559,8 @@ public sealed partial class MainWindow : Window
             : unreadable ? Loc.Get("Empty_Unreadable")
             : _source?.Kind == LogSourceKind.ProblemsOverview
                 ? someLeftOut
-                    ? Loc.Get("Empty_OverviewSomeRead")
-                    : Loc.Get("Empty_OverviewNone")
+                    ? Loc.F("Empty_OverviewSomeRead", OverviewWindowLabel())
+                    : Loc.F("Empty_OverviewNone", OverviewWindowLabel())
                 : Loc.Get("Empty_NoEvents");
         EmptyText.Visibility = shown.Count == 0 && !_recordsLoading ? Visibility.Visible : Visibility.Collapsed;
         UpdateStatus();
@@ -1090,6 +1618,14 @@ public sealed partial class MainWindow : Window
         if (_rebuilding) return;
         EventItem? item = EventList.SelectedItems.Count == 1 ? EventList.SelectedItem as EventItem : null;
         if (item != _detailItem) ShowDetail(item);
+        else if (item is null) UpdateDetailEmptyText();
+    }
+
+    private void UpdateDetailEmptyText()
+    {
+        DetailEmptyText.Text = EventList.SelectedItems.Count > 1
+            ? Loc.F("Detail_ManySelected", EventList.SelectedItems.Count.ToString("N0", CultureInfo.CurrentCulture))
+            : Loc.Get("Detail_SelectEvent");
     }
 
     private async void ShowDetail(EventItem? item)
@@ -1097,11 +1633,10 @@ public sealed partial class MainWindow : Window
         int version = ++_detailVersion;
         _detailItem = item;
         _detail = null;
+        _detailUser = null;
         DetailPanel.Visibility = item is null ? Visibility.Collapsed : Visibility.Visible;
         DetailEmptyText.Visibility = item is null ? Visibility.Visible : Visibility.Collapsed;
-        DetailEmptyText.Text = EventList.SelectedItems.Count > 1
-            ? Loc.F("Detail_ManySelected", EventList.SelectedItems.Count.ToString("N0", CultureInfo.CurrentCulture))
-            : Loc.Get("Detail_SelectEvent");
+        UpdateDetailEmptyText();
         if (item is null || _source is not { } source) return;
 
         DetailIcon.Glyph = LevelVisuals.Glyph(item.Kind);
@@ -1110,22 +1645,28 @@ public sealed partial class MainWindow : Window
         DetailSubtitle.Text = $"{item.LevelText}, {item.TimeText}";
         MessageText.Text = item.Message ?? Loc.Get("Detail_LoadingMessage");
         XmlText.Text = Loc.Get("Detail_Loading");
-        FillFields(item, null, null);
+        FillFields(item, null, CachedAccount(item.UserSid));
+        FillDataFields(null);
+
+        // Resolve the account SID independently so a slow or unreachable domain controller never stalls Message or XML.
+        Task<string?> userTask = item.UserSid is { } sid && CachedAccount(sid) is null
+            ? Task.Run(() => ResolveAccount(sid))
+            : Task.FromResult(CachedAccount(item.UserSid));
 
         EventDetail detail;
-        string? user, xml;
+        string? xml;
         try
         {
-            (detail, user, xml) = await Task.Run(() =>
+            (detail, xml) = await Task.Run(() =>
             {
                 EventDetail found = EventReader.ReadDetail(source, item);
-                return (found, ResolveAccount(item.UserSid), PrettyXml(found.Xml));
+                return (found, PrettyXml(found.Xml));
             });
         }
         catch (Exception ex)
         {
             // This is an async void handler, so an exception that escaped here would end the app.
-            if (version != _detailVersion) return;
+            if (version != _detailVersion || _closed) return;
             CrashLog.Write(ex);
             MessageText.Text = item.Message ?? CoreText.F("Error_ReadAgain", ex.Message);
             XmlText.Text = CoreText.F("Error_ReadAgain", ex.Message);
@@ -1141,7 +1682,24 @@ public sealed partial class MainWindow : Window
         }
         MessageText.Text = item.Message ?? detail.Error ?? "";
         XmlText.Text = xml ?? detail.Error ?? "";
-        FillFields(item, detail, user);
+        FillDataFields(detail.Data);
+        _detailUser = userTask.IsCompletedSuccessfully ? userTask.Result : CachedAccount(item.UserSid);
+        FillFields(item, detail, _detailUser);
+
+        if (!userTask.IsCompleted)
+        {
+            try
+            {
+                string? resolved = await userTask;
+                if (version != _detailVersion || _closed) return;
+                _detailUser = resolved;
+                FillFields(item, detail, resolved);
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Write(ex);
+            }
+        }
     }
 
     private void FillFields(EventItem item, EventDetail? detail, string? user)
@@ -1177,25 +1735,60 @@ public sealed partial class MainWindow : Window
         Add(Loc.Get("Field_RecordNumber"), item.RecordId.ToString(CultureInfo.InvariantCulture));
     }
 
-    /// <summary>Turns a SID into DOMAIN\Name. Lookups can be slow for domain accounts, so each SID is looked up once.</summary>
-    private string? ResolveAccount(string? sid)
+    private void FillDataFields(IReadOnlyList<EventDataField>? data)
+    {
+        DataFieldsGrid.Children.Clear();
+        DataFieldsGrid.RowDefinitions.Clear();
+        if (data is null || data.Count == 0)
+        {
+            DataEmptyText.Visibility = data is null ? Visibility.Collapsed : Visibility.Visible;
+            return;
+        }
+        DataEmptyText.Visibility = Visibility.Collapsed;
+        for (int i = 0; i < data.Count; i++)
+        {
+            DataFieldsGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            string label = data[i].Name.Length > 0 ? data[i].Name : $"#{i + 1}";
+            var name = new TextBlock { Text = label, Style = (Style)Application.Current.Resources["FieldLabelStyle"], IsTextSelectionEnabled = true };
+            var value = new TextBlock { Text = data[i].Value, IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap };
+            Grid.SetRow(name, i);
+            Grid.SetRow(value, i);
+            Grid.SetColumn(value, 1);
+            DataFieldsGrid.Children.Add(name);
+            DataFieldsGrid.Children.Add(value);
+        }
+    }
+
+    private string? CachedAccount(string? sid)
     {
         if (sid is null) return null;
         lock (_accountNames)
-        {
-            if (_accountNames.TryGetValue(sid, out string? cached)) return cached;
-        }
-        string name;
+            return _accountNames.TryGetValue(sid, out string? cached) ? cached : null;
+    }
+
+    /// <summary>
+    /// Turns a SID into DOMAIN\Name. Resolved names and permanently unmapped SIDs are cached; transient lookup errors
+    /// (such as an offline domain controller) fall back to the SID without caching permanently.
+    /// </summary>
+    private string? ResolveAccount(string? sid)
+    {
+        if (sid is null) return null;
+        if (CachedAccount(sid) is { } cached) return cached;
         try
         {
-            name = new SecurityIdentifier(sid).Translate(typeof(NTAccount)).Value;
+            string name = new SecurityIdentifier(sid).Translate(typeof(NTAccount)).Value;
+            lock (_accountNames) _accountNames[sid] = name;
+            return name;
         }
-        catch (Exception ex) when (ex is IdentityNotMappedException or SystemException)
+        catch (IdentityNotMappedException)
         {
-            name = sid;
+            lock (_accountNames) _accountNames[sid] = sid;
+            return sid;
         }
-        lock (_accountNames) _accountNames[sid] = name;
-        return name;
+        catch (SystemException)
+        {
+            return sid;
+        }
     }
 
     private static string? PrettyXml(string? xml)
@@ -1213,9 +1806,9 @@ public sealed partial class MainWindow : Window
 
     private void DetailTabs_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
     {
-        bool xml = sender.SelectedItem == XmlTab;
-        GeneralView.Visibility = xml ? Visibility.Collapsed : Visibility.Visible;
-        XmlView.Visibility = xml ? Visibility.Visible : Visibility.Collapsed;
+        GeneralView.Visibility = sender.SelectedItem == GeneralTab ? Visibility.Visible : Visibility.Collapsed;
+        DataView.Visibility = sender.SelectedItem == DataTab ? Visibility.Visible : Visibility.Collapsed;
+        XmlView.Visibility = sender.SelectedItem == XmlTab ? Visibility.Visible : Visibility.Collapsed;
     }
 
     // ----- Copy, open, save -----
@@ -1228,7 +1821,7 @@ public sealed partial class MainWindow : Window
         CopySelectedEvents();
     }
 
-    /// <summary>The right-click menu of the event list. It acts on the selected events.</summary>
+    /// <summary>The right-click menu of the event list. It acts on the selected events, or offers Reset filters when empty.</summary>
     private void EventList_ContextRequested(UIElement sender, ContextRequestedEventArgs args)
     {
         // A right click on an event that is not selected selects only that event, as in Explorer.
@@ -1239,44 +1832,81 @@ public sealed partial class MainWindow : Window
                 EventList.SelectedIndex = index;
         }
         long selected = EventList.SelectedRanges.Sum(r => (long)r.Length);
-        if (selected == 0) return;
+        bool filtered = HasActiveFilter();
+        if (selected == 0 && !filtered) return;
         args.Handled = true;
 
         var menu = new MenuFlyout();
-        MenuFlyoutItem copy = MenuItem(selected == 1 ? "Menu_CopyEvent" : "Menu_CopyEvents", "", (_, _) => CopySelectedEvents());
-        copy.KeyboardAcceleratorTextOverride = Loc.Get("Menu_CopyKey");
-        menu.Items.Add(copy);
+        if (selected > 0)
+        {
+            MenuFlyoutItem copy = MenuItem(selected == 1 ? "Menu_CopyEvent" : "Menu_CopyEvents", "\uE8C8", (_, _) => CopySelectedEvents());
+            copy.KeyboardAcceleratorTextOverride = Loc.Get("Menu_CopyKey");
+            menu.Items.Add(copy);
+        }
         if (selected == 1 && EventList.SelectedItem is EventItem item)
         {
-            // The detail pane shows the selected event, so its text is what gets copied.
-            menu.Items.Add(MenuItem("Menu_CopyDetails", "", (_, _) => { if (_detailItem == item) CopyDetail_Click(sender, new RoutedEventArgs()); }));
+            menu.Items.Add(MenuItem("Menu_CopyDetails", "\uE8A5", (_, _) => CopyFullDetailsForAsync(item)));
+            menu.Items.Add(MenuItem("Detail_CopyMessage", "\uE8C8", (_, _) => CopyMessageForAsync(item)));
+            menu.Items.Add(MenuItem("Detail_CopyXml", "\uE943", (_, _) => CopyXmlForAsync(item)));
             menu.Items.Add(new MenuFlyoutSeparator());
             string id = item.EventId.ToString(CultureInfo.InvariantCulture);
-            menu.Items.Add(MenuItemWithText(Loc.F("Menu_OnlyEventId", id), "", (_, _) => SetEventIdFilter(id)));
-            menu.Items.Add(MenuItemWithText(Loc.F("Menu_HideEventId", id), "", (_, _) =>
+            menu.Items.Add(MenuItemWithText(Loc.F("Menu_OnlyEventId", id), "\uE71C", (_, _) => SetEventIdFilter(id)));
+            menu.Items.Add(MenuItemWithText(Loc.F("Menu_HideEventId", id), "\uED1A", (_, _) => HideEventId(id)));
+            if (item.Provider.Length > 0)
             {
-                string current = EventIdBox.Text.Trim();
-                SetEventIdFilter(current.Length == 0 ? "-" + id : current + ", -" + id);
-            }));
+                menu.Items.Add(MenuItemWithText(Loc.F("Menu_OnlySource", item.Provider), "\uE71C", (_, _) => IncludeOnlySource(item.Provider)));
+                menu.Items.Add(MenuItemWithText(Loc.F("Menu_HideSource", item.Provider), "\uED1A", (_, _) => ExcludeSource(item.Provider)));
+            }
         }
-        bool filtered = SearchBox.Text.Length > 0 || EventIdBox.Text.Length > 0 || TimeBox.SelectedIndex > 0 || _levelButtons.Values.Any(b => b.IsChecked != true);
-        menu.Items.Add(new MenuFlyoutSeparator());
-        menu.Items.Add(MenuItem("Menu_ResetFilters", "", (_, _) => ResetFilters(), enabled: filtered));
+        if (menu.Items.Count > 0) menu.Items.Add(new MenuFlyoutSeparator());
+        menu.Items.Add(MenuItem("Menu_ResetFilters", "\uE894", (_, _) => ResetFilters(), enabled: filtered));
         ShowMenu(menu, sender, args);
     }
 
     private void SetEventIdFilter(string text)
     {
+        _suppressFilterEvents = true;
         EventIdBox.Text = text;
+        _suppressFilterEvents = false;
+        ApplyFilter();
+    }
+
+    private void HideEventId(string id)
+    {
+        string exclusion = "-" + id;
+        List<string> parts = EventIdBox.Text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        if (!parts.Any(p => string.Equals(p, exclusion, StringComparison.Ordinal))) parts.Add(exclusion);
+        SetEventIdFilter(string.Join(", ", parts));
+    }
+
+    private void IncludeOnlySource(string provider)
+    {
+        _includedSources.Clear();
+        _includedSources.Add(provider);
+        _excludedSources.Remove(provider);
+        ApplyFilter();
+    }
+
+    private void ExcludeSource(string provider)
+    {
+        _includedSources.Remove(provider);
+        _excludedSources.Add(provider);
         ApplyFilter();
     }
 
     private void ResetFilters()
     {
+        _suppressFilterEvents = true;
         SearchBox.Text = "";
         EventIdBox.Text = "";
         TimeBox.SelectedIndex = 0;
+        _lastTimeIndex = 0;
+        _customSinceUtc = null;
+        _customUntilUtc = null;
+        _includedSources.Clear();
+        _excludedSources.Clear();
         foreach (ToggleButton button in _levelButtons.Values) button.IsChecked = true;
+        _suppressFilterEvents = false;
         UpdateLevelButtons();
         ApplyFilter();
     }
@@ -1312,18 +1942,122 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void CopyDetail_Click(object sender, RoutedEventArgs e)
+    private void CopyDetail_Click(SplitButton sender, SplitButtonClickEventArgs args)
     {
         if (_detailItem is null) return;
-        var text = new StringBuilder();
-        foreach (UIElement child in FieldsGrid.Children)
+        if (DetailTabs.SelectedItem == XmlTab) CopyXmlForAsync(_detailItem);
+        else if (DetailTabs.SelectedItem == DataTab && _detail?.Data is { Count: > 0 } data)
         {
-            if (child is not TextBlock block) continue;
-            text.Append(block.Text).Append(Grid.GetColumn(block) == 0 ? ": " : "\r\n");
+            var text = new StringBuilder();
+            foreach (EventDataField field in data)
+                text.Append(field.Name.Length > 0 ? field.Name + ": " : "").Append(field.Value).Append("\r\n");
+            CopyText(text.ToString());
         }
-        text.Append("\r\n").Append(MessageText.Text).Append("\r\n");
-        if (_detail?.Xml is not null) text.Append("\r\n").Append(XmlText.Text).Append("\r\n");
-        CopyText(text.ToString());
+        else CopyFullDetailsForAsync(_detailItem);
+    }
+
+    private void CopyAllDetails_Click(object sender, RoutedEventArgs e)
+    {
+        if (_detailItem is not null) CopyFullDetailsForAsync(_detailItem);
+    }
+
+    private void CopyMessageOnly_Click(object sender, RoutedEventArgs e)
+    {
+        if (_detailItem is not null) CopyMessageForAsync(_detailItem);
+    }
+
+    private void CopyXmlOnly_Click(object sender, RoutedEventArgs e)
+    {
+        if (_detailItem is not null) CopyXmlForAsync(_detailItem);
+    }
+
+    private async void CopyFullDetailsForAsync(EventItem item)
+    {
+        try
+        {
+            if (_source is not { } source) return;
+            EventDetail detail;
+            string? user;
+            if (_detailItem == item && _detail is not null && (_detailUser is not null || item.UserSid is null))
+            {
+                detail = _detail;
+                user = _detailUser;
+            }
+            else
+            {
+                (detail, user) = await Task.Run(() => (EventReader.ReadDetail(source, item), ResolveAccount(item.UserSid)));
+                if (_closed) return;
+            }
+
+            var text = new StringBuilder();
+            void Add(string label, string? value)
+            {
+                if (!string.IsNullOrEmpty(value)) text.Append(label).Append(": ").Append(value).Append("\r\n");
+            }
+            Add(Loc.Get("Field_Log"), item.Channel);
+            Add(Loc.Get("Field_Source"), item.Provider);
+            Add(Loc.Get("Field_EventId"), item.EventIdText);
+            Add(Loc.Get("Field_Level"), item.LevelText);
+            Add(Loc.Get("Field_Task"), detail.TaskName ?? item.TaskName);
+            Add(Loc.Get("Field_Opcode"), detail.OpcodeName);
+            Add(Loc.Get("Field_Keywords"), detail.KeywordNames);
+            Add(Loc.Get("Field_Time"), item.TimeText);
+            Add(Loc.Get("Field_User"), user ?? item.UserSid ?? Loc.Get("Field_NotAvailable"));
+            Add(Loc.Get("Field_Computer"), item.Computer);
+            Add(Loc.Get("Field_ProcessId"), item.ProcessId == 0 ? null : item.ProcessId.ToString(CultureInfo.InvariantCulture));
+            Add(Loc.Get("Field_ThreadId"), item.ThreadId == 0 ? null : item.ThreadId.ToString(CultureInfo.InvariantCulture));
+            Add(Loc.Get("Field_RecordNumber"), item.RecordId.ToString(CultureInfo.InvariantCulture));
+            text.Append("\r\n").Append(item.Message ?? detail.Message ?? detail.Error ?? "").Append("\r\n");
+            if (PrettyXml(detail.Xml) is { } xml) text.Append("\r\n").Append(xml).Append("\r\n");
+            CopyText(text.ToString());
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write(ex);
+            ShowProblem(Loc.F("Problem_CopyFailed", ex.Message), offerAdmin: false);
+        }
+    }
+
+    private async void CopyMessageForAsync(EventItem item)
+    {
+        try
+        {
+            if (item.Message is { } loaded)
+            {
+                CopyText(loaded);
+                return;
+            }
+            if (_source is not { } source) return;
+            EventDetail detail = await Task.Run(() => EventReader.ReadDetail(source, item));
+            if (_closed) return;
+            string? message = detail.Message ?? detail.Error;
+            if (!string.IsNullOrEmpty(message)) CopyText(message);
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write(ex);
+            ShowProblem(Loc.F("Problem_CopyFailed", ex.Message), offerAdmin: false);
+        }
+    }
+
+    private async void CopyXmlForAsync(EventItem item)
+    {
+        try
+        {
+            if (_detailItem == item && _detail?.Xml is { } existing)
+            {
+                CopyText(PrettyXml(existing) ?? existing);
+                return;
+            }
+            if (_source is not { } source) return;
+            string? xml = await Task.Run(() => PrettyXml(EventReader.ReadDetail(source, item).Xml));
+            if (!_closed && !string.IsNullOrEmpty(xml)) CopyText(xml);
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write(ex);
+            ShowProblem(Loc.F("Problem_CopyFailed", ex.Message), offerAdmin: false);
+        }
     }
 
     private void CopyText(string text)
@@ -1350,7 +2084,7 @@ public sealed partial class MainWindow : Window
             var picker = new FileOpenPicker(AppWindow.Id);
             picker.FileTypeFilter.Add(".evtx");
             PickFileResult? result = await picker.PickSingleFileAsync();
-            if (result is not null) OpenFile(result.Path);
+            if (!_closed && result is not null) OpenFile(result.Path);
         }
         catch (Exception ex)
         {
@@ -1373,7 +2107,7 @@ public sealed partial class MainWindow : Window
             }
             int version = _loadVersion;
             string path = await PickSavePath(Loc.Get("Save_CsvType"), ".csv", "-events");
-            if (path.Length == 0) return;
+            if (_closed || path.Length == 0) return;
             if (version != _loadVersion || _recordsLoading)
             {
                 ShowProblem(_recordsLoading ? stillReading : Loc.Get("Save_OtherLogOpened"), offerAdmin: false);
@@ -1409,7 +2143,7 @@ public sealed partial class MainWindow : Window
             LogSource? target = sender is FrameworkElement { Tag: LogSource tagged } ? tagged : _source;
             if (target is not { SupportsEvtxExport: true } source) return;
             string path = await PickSavePath(Loc.Get("Save_EvtxType"), ".evtx", "", source.DisplayName);
-            if (path.Length == 0) return;
+            if (_closed || path.Length == 0) return;
             await RunSave(() =>
             {
                 EventExport.SaveEvtx(source, path);
@@ -1430,9 +2164,10 @@ public sealed partial class MainWindow : Window
     {
         string baseName = SafeFileName(logName ?? _source?.DisplayName ?? "events");
         if (baseName.EndsWith(extension, StringComparison.OrdinalIgnoreCase)) baseName = baseName[..^extension.Length];
+        string date = DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         var picker = new FileSavePicker(AppWindow.Id)
         {
-            SuggestedFileName = $"{baseName}{suffix}-{DateTime.Now:yyyy-MM-dd}",
+            SuggestedFileName = $"{baseName}{suffix}-{date}",
             DefaultFileExtension = extension,
         };
         picker.FileTypeChoices.Add(typeName, [extension]);
@@ -1578,6 +2313,7 @@ public sealed partial class MainWindow : Window
     {
         // A copy that stayed in the temporary folder is the only copy of a cleared log, so those messages come first.
         var keptCopies = new List<string>();
+        var keptPaths = new List<string>();
         var unexpected = new List<string>();
         var refused = new List<string>();
         bool offerAdmin = false;
@@ -1588,7 +2324,10 @@ public sealed partial class MainWindow : Window
                 case null:
                     break;
                 case BackupNotSavedException ex:
+                    // Always record the recovery path in the crash log so it can never be lost if the InfoBar closes.
+                    CrashLog.Write(ex);
                     keptCopies.Add(ex.Message);
+                    keptPaths.Add(ex.KeptAt);
                     break;
                 case EventLogException ex:
                     // Windows refused before deleting anything.
@@ -1603,6 +2342,8 @@ public sealed partial class MainWindow : Window
                     break;
             }
         }
+        if (keptPaths.Count > 0) ShowBackupRecoveryDialogAsync(keptCopies, keptPaths);
+
         List<string> problems = [.. keptCopies, .. unexpected, .. refused];
         if (!request.IsFolder)
         {
@@ -1621,6 +2362,43 @@ public sealed partial class MainWindow : Window
         else ShowInfo(message.ToString());
     }
 
+    /// <summary>Shows a modal dialog with every temporary backup path when moving a cleared log's only copy failed.</summary>
+    private async void ShowBackupRecoveryDialogAsync(List<string> messages, List<string> paths)
+    {
+        if (_closed) return;
+        try
+        {
+            var content = new StackPanel { Spacing = 8 };
+            content.Children.Add(new TextBlock { Text = Loc.Get("Clear_RecoveryBody"), TextWrapping = TextWrapping.Wrap });
+            var list = new TextBlock
+            {
+                Text = string.Join("\r\n\r\n", messages),
+                TextWrapping = TextWrapping.Wrap,
+                IsTextSelectionEnabled = true,
+            };
+            content.Children.Add(new ScrollViewer { MaxHeight = 280, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = list });
+
+            var dialog = new ContentDialog
+            {
+                XamlRoot = Content.XamlRoot,
+                Title = Loc.Get("Clear_RecoveryTitle"),
+                Content = content,
+                PrimaryButtonText = Loc.Get("Clear_RecoveryCopy"),
+                SecondaryButtonText = Loc.Get("Clear_RecoveryOpenFolder"),
+                CloseButtonText = Loc.Get("Clear_RecoveryClose"),
+                DefaultButton = ContentDialogButton.Primary,
+            };
+            ContentDialogResult result = await dialog.ShowAsync();
+            if (_closed) return;
+            if (result == ContentDialogResult.Primary) CopyText(string.Join("\r\n", paths));
+            else if (result == ContentDialogResult.Secondary && paths.Count > 0) ShowInFolder(paths[0]);
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write(ex);
+        }
+    }
+
     private async Task<string> PickFolder()
     {
         PickFolderResult? result = await new FolderPicker(AppWindow.Id).PickSingleFolderAsync();
@@ -1630,10 +2408,11 @@ public sealed partial class MainWindow : Window
     /// <summary>One file per log in the chosen folder, named after the log and the date, and never one that already exists.</summary>
     private static string?[] BackupPaths(string folder, List<LogSource> logs)
     {
+        string date = DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         return logs.Select(string? (log) =>
         {
-            string baseName = $"{SafeFileName(log.DisplayName)}-{DateTime.Now:yyyy-MM-dd}";
+            string baseName = $"{SafeFileName(log.DisplayName)}-{date}";
             string path = Path.Combine(folder, baseName + ".evtx");
             for (int n = 2; File.Exists(path) || !used.Add(path); n++) path = Path.Combine(folder, $"{baseName} ({n}).evtx");
             return path;
@@ -1650,6 +2429,7 @@ public sealed partial class MainWindow : Window
             && logs.Any(log => string.Equals(log.Path, open.Path, StringComparison.OrdinalIgnoreCase)))
             Open(open);
     }
+
     /// <summary>Runs a save off the UI thread and shows the message it returns, or why it failed.</summary>
     private async Task RunSave(Func<string> save)
     {
@@ -1678,24 +2458,31 @@ public sealed partial class MainWindow : Window
 
     private void Refresh_Click(object sender, RoutedEventArgs e)
     {
-        if (_source is not null) Open(_source.Kind == LogSourceKind.ProblemsOverview ? CreateOverviewSource() : _source);
+        if (_source is null) return;
+        if (_source.Kind == LogSourceKind.Channel) RecountLog(_source.Path);
+        Open(_source.Kind == LogSourceKind.ProblemsOverview ? CreateOverviewSource() : _source);
     }
 
     private void Admin_Click(object sender, RoutedEventArgs e)
     {
         string? executable = Environment.ProcessPath;
         if (executable is null || RefuseWhileClearing()) return;
+        SaveWindowLayout();
         var start = new ProcessStartInfo(executable) { UseShellExecute = true, Verb = "runas" };
         foreach (string argument in StartupArguments.For(_source)) start.ArgumentList.Add(argument);
         try
         {
-            Process.Start(start);
+            using Process? started = Process.Start(start);
+            if (started is not null)
+            {
+                _skipSaveLayoutOnClose = true;
+                Close();
+            }
         }
         catch (System.ComponentModel.Win32Exception)
         {
-            return; // The UAC prompt was cancelled; keep this window.
+            // The UAC prompt was cancelled; keep this window.
         }
-        Close();
     }
 
     private void ShowInfo(string message)

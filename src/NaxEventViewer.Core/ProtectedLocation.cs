@@ -19,12 +19,14 @@ public static class ProtectedLocation
     ];
 
     // Rights that let someone replace, rename or re-permission the file, its folder, or a folder above it.
-    private const FileSystemRights FileRights = FileSystemRights.WriteData | FileSystemRights.AppendData | FileSystemRights.Delete
+    private const FileSystemRights GenericWriteRights = (FileSystemRights)0x50000000; // GENERIC_WRITE | GENERIC_ALL
+    private const FileSystemRights FileRights = GenericWriteRights | FileSystemRights.WriteData | FileSystemRights.AppendData | FileSystemRights.Delete
+        | FileSystemRights.WriteAttributes | FileSystemRights.ChangePermissions | FileSystemRights.TakeOwnership;
+    private const FileSystemRights FolderRights = GenericWriteRights | FileSystemRights.CreateFiles | FileSystemRights.CreateDirectories
+        | FileSystemRights.DeleteSubdirectoriesAndFiles | FileSystemRights.Delete | FileSystemRights.WriteAttributes
         | FileSystemRights.ChangePermissions | FileSystemRights.TakeOwnership;
-    private const FileSystemRights FolderRights = FileSystemRights.CreateFiles | FileSystemRights.DeleteSubdirectoriesAndFiles
-        | FileSystemRights.Delete | FileSystemRights.ChangePermissions | FileSystemRights.TakeOwnership;
-    private const FileSystemRights AncestorRights = FileSystemRights.DeleteSubdirectoriesAndFiles | FileSystemRights.Delete
-        | FileSystemRights.ChangePermissions | FileSystemRights.TakeOwnership;
+    private const FileSystemRights AncestorRights = GenericWriteRights | FileSystemRights.DeleteSubdirectoriesAndFiles | FileSystemRights.Delete
+        | FileSystemRights.WriteAttributes | FileSystemRights.ChangePermissions | FileSystemRights.TakeOwnership;
 
     /// <summary>
     /// True when no account other than the system, administrators and TrustedInstaller may change the file, the folder
@@ -35,13 +37,15 @@ public static class ProtectedLocation
         try
         {
             var file = new FileInfo(Path.GetFullPath(filePath));
-            if (!file.Exists || !OnlyTrustedMayHave(file.GetAccessControl(), FileRights)) return false;
+            string? root = Path.GetPathRoot(file.FullName);
+            if (root is null || root.Length != 3 || root[1] != ':' || new DriveInfo(root).DriveType != DriveType.Fixed) return false;
+            if (!file.Exists || IsReparsePoint(file) || !OnlyTrustedMayHave(file.GetAccessControl(), FileRights)) return false;
             DirectoryInfo? folder = file.Directory;
-            if (folder is null || !OnlyTrustedMayHave(folder.GetAccessControl(), FolderRights)) return false;
+            if (folder is null || !IsProtectedDirectory(folder, FolderRights)) return false;
             // Renaming a folder above needs Delete on that folder or DeleteSubdirectoriesAndFiles on its parent.
             for (DirectoryInfo? ancestor = folder.Parent; ancestor is not null; ancestor = ancestor.Parent)
             {
-                if (!OnlyTrustedMayHave(ancestor.GetAccessControl(), AncestorRights)) return false;
+                if (!IsProtectedDirectory(ancestor, AncestorRights)) return false;
             }
             return true;
         }
@@ -51,9 +55,15 @@ public static class ProtectedLocation
         }
     }
 
+    private static bool IsProtectedDirectory(DirectoryInfo directory, FileSystemRights rights) =>
+        directory.Exists && !IsReparsePoint(directory) && OnlyTrustedMayHave(directory.GetAccessControl(), rights);
+
+    private static bool IsReparsePoint(FileSystemInfo entry) => (entry.Attributes & FileAttributes.ReparsePoint) != 0;
+
     private static bool OnlyTrustedMayHave(FileSystemSecurity security, FileSystemRights rights)
     {
-        if (security.GetOwner(typeof(SecurityIdentifier)) is SecurityIdentifier owner && !IsTrusted(owner)) return false;
+        var descriptor = new RawSecurityDescriptor(security.GetSecurityDescriptorBinaryForm(), 0);
+        if (descriptor.DiscretionaryAcl is null || descriptor.Owner is not SecurityIdentifier owner || !IsTrusted(owner)) return false;
         foreach (FileSystemAccessRule rule in security.GetAccessRules(includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier)))
         {
             // An inherit-only entry applies to children, not to this object.

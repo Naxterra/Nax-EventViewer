@@ -25,7 +25,7 @@ internal sealed unsafe class SystemRenderer : IDisposable
     private const int Computer = 15;
     private const int UserId = 16;
 
-    private readonly nint _context;
+    private nint _context;
     private readonly StringPool _strings;
     private byte[] _buffer = new byte[4096];
 
@@ -84,7 +84,7 @@ internal sealed unsafe class SystemRenderer : IDisposable
             Task = Value(Task).BaseType == Wevtapi.EvtVarTypeUInt16 ? Value(Task).UInt16 : (ushort)0,
             Opcode = Value(Opcode).BaseType == Wevtapi.EvtVarTypeByte ? Value(Opcode).Byte : (byte)0,
             Keywords = Value(Keywords).BaseType is Wevtapi.EvtVarTypeHexInt64 or Wevtapi.EvtVarTypeUInt64 ? Value(Keywords).UInt64 : 0,
-            TimeCreatedUtc = Value(TimeCreated).BaseType == Wevtapi.EvtVarTypeFileTime ? FileTimeToUtc(Value(TimeCreated).UInt64) : DateTime.MinValue,
+            TimeCreatedUtc = Value(TimeCreated).BaseType == Wevtapi.EvtVarTypeFileTime ? FileTimeToUtc(Value(TimeCreated).UInt64) : EarliestUtc,
             RecordId = Value(EventRecordId).BaseType == Wevtapi.EvtVarTypeUInt64 ? Value(EventRecordId).UInt64 : 0,
             ProcessId = Value(ProcessId).BaseType == Wevtapi.EvtVarTypeUInt32 ? Value(ProcessId).UInt32 : 0,
             ThreadId = Value(ThreadId).BaseType == Wevtapi.EvtVarTypeUInt32 ? Value(ThreadId).UInt32 : 0,
@@ -94,9 +94,11 @@ internal sealed unsafe class SystemRenderer : IDisposable
 
     private static readonly ulong LatestFileTime = (ulong)DateTime.MaxValue.ToFileTimeUtc();
 
+    private static readonly DateTime EarliestUtc = new(0, DateTimeKind.Utc);
+
     /// <summary>Converts a FILETIME. A damaged or crafted file can hold any value, and one out of range becomes the earliest date instead of an exception.</summary>
     internal static DateTime FileTimeToUtc(ulong fileTime) =>
-        fileTime <= LatestFileTime ? DateTime.FromFileTimeUtc((long)fileTime) : DateTime.MinValue;
+        fileTime <= LatestFileTime ? DateTime.FromFileTimeUtc((long)fileTime) : EarliestUtc;
 
     private string? String(EvtVariant value) =>
         value.BaseType == Wevtapi.EvtVarTypeString && value.Pointer != 0
@@ -116,7 +118,11 @@ internal sealed unsafe class SystemRenderer : IDisposable
         }
     }
 
-    public void Dispose() => Wevtapi.EvtClose(_context);
+    public void Dispose()
+    {
+        nint context = Interlocked.Exchange(ref _context, 0);
+        if (context != 0) Wevtapi.EvtClose(context);
+    }
 }
 
 /// <summary>

@@ -65,8 +65,8 @@
   <data name="Empty_NoMatch" xml:space="preserve"><value>No events match the filter.</value></data>
   <data name="Empty_NoneOpened" xml:space="preserve"><value>None of these logs could be opened.</value></data>
   <data name="Empty_Unreadable" xml:space="preserve"><value>This log could not be read. The message above says why.</value></data>
-  <data name="Empty_OverviewSomeRead" xml:space="preserve"><value>The logs that could be read had no critical events, errors or warnings in the last 24 hours.</value></data>
-  <data name="Empty_OverviewNone" xml:space="preserve"><value>No log had critical events, errors or warnings in the last 24 hours.</value></data>
+  <data name="Empty_OverviewSomeRead" xml:space="preserve"><value>The logs that could be read had no critical events, errors, warnings or audit failures in the last {0}.</value></data>
+  <data name="Empty_OverviewNone" xml:space="preserve"><value>No log had critical events, errors, warnings or audit failures in the last {0}.</value></data>
   <data name="Empty_NoEvents" xml:space="preserve"><value>This log has no events.</value></data>
   <data name="Status_Reading" xml:space="preserve"><value>Reading {0}… {1} events so far.</value></data>
   <data name="Status_Showing" xml:space="preserve"><value>Showing {0} of {1} events.</value></data>
@@ -147,4 +147,38 @@
   <data name="Clear_FailedLog" xml:space="preserve"><value>{0} could not be cleared, so nothing was deleted from it. {1}</value></data>
   <data name="Clear_UnexpectedLog" xml:space="preserve"><value>Clearing {0} stopped with an unexpected error. Check whether this log was emptied. {1}</value></data>
   <data name="Clear_WaitBeforeClosing" xml:space="preserve"><value>Logs are still being cleared. Close the window once clearing has finished.</value></data>
+  <data name="Search_ToolTip" xml:space="preserve"><value>Search messages, sources, computers and IDs. Use "quotes" for exact phrases and -word to exclude.</value></data>
+  <data name="Time_Custom" xml:space="preserve"><value>Custom range…</value></data>
+  <data name="Time_CustomTitle" xml:space="preserve"><value>Filter by date and time</value></data>
+  <data name="Time_From" xml:space="preserve"><value>From</value></data>
+  <data name="Time_To" xml:space="preserve"><value>To</value></data>
+  <data name="Time_Apply" xml:space="preserve"><value>Apply</value></data>
+  <data name="Time_RangeInvalid" xml:space="preserve"><value>The end date and time must not be earlier than the start.</value></data>
+  <data name="Filter_Reset" xml:space="preserve"><value>Reset filters</value></data>
+  <data name="Filter_ResetTip" xml:space="preserve"><value>Clear search, event IDs, time range, source and level filters</value></data>
+  <data name="Filter_SourceOnly" xml:space="preserve"><value>Source: {0}</value></data>
+  <data name="Filter_SourceHiddenOne" xml:space="preserve"><value>Hidden source: {0}</value></data>
+  <data name="Filter_SourceHiddenMany" xml:space="preserve"><value>{0} sources hidden</value></data>
+  <data name="Tree_SearchPlaceholder" xml:space="preserve"><value>Filter logs</value></data>
+  <data name="Tree_OverviewRange" xml:space="preserve"><value>Problems in all logs ({0})</value></data>
+  <data name="Overview_WindowMenu" xml:space="preserve"><value>Overview window</value></data>
+  <data name="Overview_1h" xml:space="preserve"><value>1 h</value></data>
+  <data name="Overview_24h" xml:space="preserve"><value>24 h</value></data>
+  <data name="Overview_7d" xml:space="preserve"><value>7 d</value></data>
+  <data name="Overview_30d" xml:space="preserve"><value>30 d</value></data>
+  <data name="Column_Log" xml:space="preserve"><value>Log</value></data>
+  <data name="Detail_Data" xml:space="preserve"><value>Event data</value></data>
+  <data name="Detail_NoData" xml:space="preserve"><value>This event has no structured data fields.</value></data>
+  <data name="Detail_CopyAll" xml:space="preserve"><value>Copy full details</value></data>
+  <data name="Detail_CopyMessage" xml:space="preserve"><value>Copy message</value></data>
+  <data name="Detail_CopyXml" xml:space="preserve"><value>Copy XML</value></data>
+  <data name="Menu_OnlySource" xml:space="preserve"><value>Show only source "{0}"</value></data>
+  <data name="Menu_HideSource" xml:space="preserve"><value>Hide source "{0}"</value></data>
+  <data name="Menu_CloseFile" xml:space="preserve"><value>Remove from list</value></data>
+  <data name="Clear_RecoveryTitle" xml:space="preserve"><value>Cleared log backups kept locally</value></data>
+  <data name="Clear_RecoveryBody" xml:space="preserve"><value>One or more logs were cleared, but their backups could not be moved to the chosen destination. These temporary files are the only remaining copies:</value></data>
+  <data name="Clear_RecoveryCopy" xml:space="preserve"><value>Copy paths</value></data>
+  <data name="Clear_RecoveryOpenFolder" xml:space="preserve"><value>Open folder</value></data>
+  <data name="Clear_RecoveryClose" xml:space="preserve"><value>Close</value></data>
+  <data name="Drop_OpenEvtx" xml:space="preserve"><value>Open .evtx file</value></data>
 </root>

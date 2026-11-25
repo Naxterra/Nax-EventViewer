@@ -59,6 +59,29 @@ function OpenWithValuePresent {
     (Test-Path $openWithKey) -and ((Get-Item $openWithKey).GetValueNames() -contains 'NaxEventViewer.evtx')
 }
 
+function Test-RunningMutex {
+    if (-not ('NaxMutexProbe' -as [type])) {
+        Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class NaxMutexProbe {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr OpenMutexW(uint desiredAccess, bool inheritHandle, string name);
+    [DllImport("kernel32.dll")]
+    private static extern bool CloseHandle(IntPtr handle);
+    public static bool Exists(string name) {
+        // SYNCHRONIZE (0x00100000) is the exact right Inno Setup's AppMutex requests.
+        IntPtr handle = OpenMutexW(0x00100000u, false, name);
+        if (handle == IntPtr.Zero) return false;
+        CloseHandle(handle);
+        return true;
+    }
+}
+"@
+    }
+    return [NaxMutexProbe]::Exists('NaxEventViewer.Running')
+}
+
 function Start-InstalledApp {
     $process = Start-Process $exe -ArgumentList '--log', 'Application' -PassThru
     $deadline = (Get-Date).AddSeconds(45)
@@ -120,10 +143,8 @@ try {
     if ($app.HasExited) { $problems += "the app ended at start with exit code $($app.ExitCode)" }
     elseif ($app.MainWindowHandle -eq 0) { $problems += 'the app showed no window within 45 seconds' }
     else {
-        # The installer finds the running app through this mutex, so a normal process must be able to open it.
-        $mutex = $null
-        if ([Threading.Mutex]::TryOpenExisting('NaxEventViewer.Running', [ref]$mutex)) { $mutex.Dispose() }
-        else { $problems += 'the running app has no mutex that a normal process can open' }
+        # The installer finds the running app through this mutex with SYNCHRONIZE access, so a normal process must be able to open it.
+        if (-not (Test-RunningMutex)) { $problems += 'the running app has no mutex that a normal process can open with SYNCHRONIZE access' }
     }
     Report 'installed_app_carries_its_own_dotnet_starts_and_creates_its_running_mutex' `
         'The installed program folder contains the .NET runtime, the app does not ask for a .NET installed on the PC, it starts and shows its window, and another normal process can open its running mutex. An app started as administrator is not covered.' $problems
@@ -154,10 +175,11 @@ try {
     Report 'uninstall_while_the_app_runs_removes_all_or_nothing' `
         'Uninstalling while the app is open either refuses and leaves the installation complete, or removes all of it, but never leaves half of it.' $problems
 
-    # A crash log and a log copy written while the app was installed must go with the app.
+    # A crash log, a stale randomized settings temp file, and a log copy written while the app was installed must go with the app.
     New-Item -ItemType Directory -Force $crashFolder | Out-Null
     Set-Content (Join-Path $crashFolder 'crash.log') 'test entry'
     Set-Content (Join-Path $crashFolder 'settings.json') '{"Language":"de-DE"}'
+    Set-Content (Join-Path $crashFolder ('settings.json.' + [Guid]::NewGuid().ToString('N') + '.tmp')) 'partial'
     Set-Content $leftoverCopy 'test copy'
 
     $problems = @()

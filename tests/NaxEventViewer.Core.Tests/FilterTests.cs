@@ -185,5 +185,71 @@ internal static class FilterTests
                 Check.Equal("The service started.", EventItem.MakePreview("\r\n  The service \t  started.\r\nDetails follow."));
                 Check.Equal(300, EventItem.MakePreview(new string('x', 1000)).Length);
             });
+
+        yield return ("text_filter_supports_quoted_phrases_and_negated_terms",
+            "Searching for \"access denied\" -svchost matches an event containing the exact phrase without svchost and hides events containing svchost or only separate words.",
+            () =>
+            {
+                var filter = new EventFilter { Text = "\"access denied\" -svchost" };
+                Check.That(filter.Matches(Fixtures.Item(Now, message: "Service access denied on pipe.")), "exact phrase without excluded term matches");
+                Check.That(!filter.Matches(Fixtures.Item(Now, message: "svchost reported access denied.")), "excluded term hides the event");
+                Check.That(!filter.Matches(Fixtures.Item(Now, message: "access was later denied.")), "non-adjacent words do not match a quoted phrase");
+            });
+
+        yield return ("text_filter_matches_computer_name",
+            "Searching for a computer name matches events originating from that computer.",
+            () =>
+            {
+                var item = new EventItem { Channel = "ForwardedEvents", Provider = "System", Computer = "DC-PROD-01", TimeCreatedUtc = Now, RecordId = 1 };
+                Check.That(new EventFilter { Text = "dc-prod-01" }.Matches(item), "computer name matches ignoring case");
+                Check.That(!new EventFilter { Text = "dc-prod-02" }.Matches(item), "another computer name does not match");
+            });
+
+        yield return ("time_range_filter_enforces_both_since_and_until",
+            "Filtering with both SinceUtc and UntilUtc shows only events inside the range and excludes older and newer ones.",
+            () =>
+            {
+                var filter = new EventFilter { SinceUtc = Now.AddHours(-2), UntilUtc = Now.AddHours(-1) };
+                Check.That(!filter.Matches(Fixtures.Item(Now.AddHours(-3))), "older event is excluded");
+                Check.That(filter.Matches(Fixtures.Item(Now.AddMinutes(-90))), "event inside the range matches");
+                Check.That(!filter.Matches(Fixtures.Item(Now.AddMinutes(-10))), "newer event is excluded");
+            });
+
+        yield return ("source_filter_includes_and_excludes_providers",
+            "Included and excluded source sets filter events by provider name ignoring case, even when the caller supplies a default case-sensitive set.",
+            () =>
+            {
+                var onlyDisk = new EventFilter { IncludedSources = new HashSet<string> { "Disk" } };
+                Check.That(onlyDisk.Matches(Fixtures.Item(Now, provider: "disk")), "included provider matches ignoring case");
+                Check.That(!onlyDisk.Matches(Fixtures.Item(Now, provider: "Tcpip")), "other provider is hidden");
+
+                var hideTcpip = new EventFilter { ExcludedSources = new HashSet<string> { "Tcpip" } };
+                Check.That(hideTcpip.Matches(Fixtures.Item(Now, provider: "Disk")), "non-excluded provider stays visible");
+                Check.That(!hideTcpip.Matches(Fixtures.Item(Now, provider: "TCPIP")), "excluded provider is hidden");
+            });
+
+        yield return ("text_filter_matches_multiline_quoted_phrase_in_stored_message",
+            "A quoted phrase spanning a line break matches a MessageStore-backed event the same way it matches a plain message.",
+            () =>
+            {
+                var store = new MessageStore();
+                var storedItem = Fixtures.Item(Now, recordId: 1);
+                storedItem.SetFormatted(store.Add("First line\nSecond line"), null);
+                var plainItem = Fixtures.Item(Now, recordId: 2, message: "First line\nSecond line");
+                var filter = new EventFilter { Text = "\"First line\nSecond line\"" };
+                Check.That(filter.Matches(plainItem), "plain message matches multiline phrase");
+                Check.That(filter.Matches(storedItem), "stored message matches multiline phrase");
+            });
+
+        yield return ("sort_by_log_orders_events_by_channel_name",
+            "Sorting by the Log column orders events alphabetically by channel name.",
+            () =>
+            {
+                var sys = new EventItem { Channel = "System", Provider = "p", TimeCreatedUtc = Now, RecordId = 1 };
+                var app = new EventItem { Channel = "Application", Provider = "p", TimeCreatedUtc = Now, RecordId = 2 };
+                var list = new List<EventItem> { sys, app };
+                list.Sort(new EventComparer(SortColumn.Log, descending: false));
+                Check.That(list.SequenceEqual([app, sys]), "Application comes before System when sorted ascending");
+            });
     }
 }

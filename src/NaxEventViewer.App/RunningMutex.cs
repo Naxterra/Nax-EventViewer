@@ -14,7 +14,8 @@ internal static partial class RunningMutex
     // window or the installer, open the mutex that a window running as administrator created. Without this, Windows
     // gives that mutex the administrator's default permissions and a high integrity label, and only elevated
     // processes could see that the app is running.
-    private const string Permissions = "D:(A;;GA;;;WD)S:(ML;;NW;;;LW)";
+    private const string Permissions = "D:(A;;0x00120000;;;WD)S:(ML;;NW;;;LW)";
+    private const uint ReadAccess = 0x00120000; // SYNCHRONIZE | READ_CONTROL
 
     private static nint _handle;
 
@@ -26,7 +27,8 @@ internal static partial class RunningMutex
         try
         {
             var attributes = new SecurityAttributes { Length = Marshal.SizeOf<SecurityAttributes>(), Descriptor = descriptor };
-            _handle = CreateMutex(attributes, initialOwner: false, Name);
+            var handle = CreateMutex(attributes, Name, 0, ReadAccess);
+            if (handle != 0 && Interlocked.CompareExchange(ref _handle, handle, 0) != 0) CloseHandle(handle);
         }
         finally
         {
@@ -46,8 +48,12 @@ internal static partial class RunningMutex
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool ConvertStringSecurityDescriptorToSecurityDescriptor(string descriptor, int revision, out nint securityDescriptor, nint size);
 
-    [LibraryImport("kernel32.dll", EntryPoint = "CreateMutexW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
-    private static partial nint CreateMutex(in SecurityAttributes attributes, [MarshalAs(UnmanagedType.Bool)] bool initialOwner, string name);
+    [LibraryImport("kernel32.dll", EntryPoint = "CreateMutexExW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    private static partial nint CreateMutex(in SecurityAttributes attributes, string name, uint flags, uint access);
+
+    [LibraryImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool CloseHandle(nint handle);
 
     [LibraryImport("kernel32.dll")]
     private static partial nint LocalFree(nint memory);

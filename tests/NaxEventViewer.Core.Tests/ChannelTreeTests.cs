@@ -67,7 +67,9 @@ internal static class ChannelTreeTests
                     foreach (XElement select in list.Descendants("Select"))
                     {
                         paths.Add((string)select.Attribute("Path")!);
-                        Check.That(select.Value.Contains("Level=1 or Level=2 or Level=3") && select.Value.Contains("timediff(@SystemTime) <= 86400000"), "each select filters levels and time");
+                        Check.That(select.Value.Contains("Level=1 or Level=2 or Level=3")
+                            && select.Value.Contains("band(Keywords,4503599627370496)")
+                            && select.Value.Contains("timediff(@SystemTime) <= 86400000"), "each select filters levels, audit failures and time");
                     }
                 }
                 Check.That(paths.SequenceEqual(channels), "every log appears once, with its name unchanged");

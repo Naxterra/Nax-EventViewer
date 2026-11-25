@@ -11,11 +11,15 @@ internal static unsafe partial class Wevtapi
 {
     private const string Dll = "wevtapi.dll";
 
+    public const int ErrorFileNotFound = 2;
+    public const int ErrorPathNotFound = 3;
     public const int ErrorAccessDenied = 5;
     public const int ErrorInsufficientBuffer = 122;
     public const int ErrorNoMoreItems = 259;
-    public const int ErrorEvtChannelNotFound = 15007;
     public const int ErrorEvtPublisherMetadataNotFound = 15002;
+    public const int ErrorEvtChannelNotFound = 15007;
+    public const int ErrorEvtQueryResultStale = 15011;
+    public const int ErrorEvtInvalidOperationOverEnabledDirectChannel = 15022;
     public const int ErrorEvtMessageNotFound = 15027;
     public const int ErrorEvtMessageIdNotFound = 15028;
     public const int ErrorEvtUnresolvedValueInsert = 15029;

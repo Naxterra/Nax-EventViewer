@@ -3,6 +3,7 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Globalization;
 using Microsoft.UI;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 using NaxEventViewer.Core;
 
@@ -123,4 +124,57 @@ public static class LevelVisuals
         EventLevelKind.AuditSuccess => SuccessBrush,
         _ => InformationBrush,
     };
+}
+
+/// <summary>Shared column widths bound by both the header row and every realized event row.</summary>
+public sealed partial class ColumnWidths : INotifyPropertyChanged
+{
+    private GridLength _level = new(156);
+    private GridLength _time = new(164);
+    private GridLength _log = new(0);
+    private GridLength _source = new(230);
+    private GridLength _eventId = new(72);
+    private GridLength _task = new(140);
+    private double _savedLogWidth = 170;
+    private bool _showLog;
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    public GridLength Level { get => _level; set => Set(ref _level, value, nameof(Level)); }
+    public GridLength Time { get => _time; set => Set(ref _time, value, nameof(Time)); }
+    public GridLength Log { get => _log; set => Set(ref _log, value, nameof(Log)); }
+    public GridLength Source { get => _source; set => Set(ref _source, value, nameof(Source)); }
+    public GridLength EventId { get => _eventId; set => Set(ref _eventId, value, nameof(EventId)); }
+    public GridLength Task { get => _task; set => Set(ref _task, value, nameof(Task)); }
+
+    public Visibility LogVisibility => _showLog ? Visibility.Visible : Visibility.Collapsed;
+
+    public double SavedLogWidth
+    {
+        get => _savedLogWidth;
+        set
+        {
+            _savedLogWidth = Math.Clamp(value, 100, 500);
+            if (_showLog) Log = new GridLength(_savedLogWidth);
+        }
+    }
+
+    public bool ShowLog
+    {
+        get => _showLog;
+        set
+        {
+            if (_showLog == value) return;
+            _showLog = value;
+            Log = value ? new GridLength(_savedLogWidth) : new GridLength(0);
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(LogVisibility)));
+        }
+    }
+
+    private void Set(ref GridLength field, GridLength value, string name)
+    {
+        if (field.Equals(value)) return;
+        field = value;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+    }
 }

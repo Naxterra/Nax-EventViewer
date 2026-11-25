@@ -65,8 +65,8 @@
   <data name="Empty_NoMatch" xml:space="preserve"><value>Kein Ereignis entspricht dem Filter.</value></data>
   <data name="Empty_NoneOpened" xml:space="preserve"><value>Keines dieser Protokolle konnte geöffnet werden.</value></data>
   <data name="Empty_Unreadable" xml:space="preserve"><value>Dieses Protokoll konnte nicht gelesen werden. Die Meldung oben nennt den Grund.</value></data>
-  <data name="Empty_OverviewSomeRead" xml:space="preserve"><value>Die lesbaren Protokolle hatten in den letzten 24 Stunden keine kritischen Ereignisse, Fehler oder Warnungen.</value></data>
-  <data name="Empty_OverviewNone" xml:space="preserve"><value>Kein Protokoll hatte in den letzten 24 Stunden kritische Ereignisse, Fehler oder Warnungen.</value></data>
+  <data name="Empty_OverviewSomeRead" xml:space="preserve"><value>Die lesbaren Protokolle hatten im Zeitraum {0} keine kritischen Ereignisse, Fehler, Warnungen oder Überwachungsfehler.</value></data>
+  <data name="Empty_OverviewNone" xml:space="preserve"><value>Kein Protokoll hatte im Zeitraum {0} kritische Ereignisse, Fehler, Warnungen oder Überwachungsfehler.</value></data>
   <data name="Empty_NoEvents" xml:space="preserve"><value>Dieses Protokoll enthält keine Ereignisse.</value></data>
   <data name="Status_Reading" xml:space="preserve"><value>{0} wird gelesen… bisher {1} Ereignisse.</value></data>
   <data name="Status_Showing" xml:space="preserve"><value>{0} von {1} Ereignissen werden angezeigt.</value></data>
@@ -147,4 +147,38 @@
   <data name="Clear_FailedLog" xml:space="preserve"><value>{0} konnte nicht geleert werden, daher wurde daraus nichts gelöscht. {1}</value></data>
   <data name="Clear_UnexpectedLog" xml:space="preserve"><value>Das Leeren von {0} wurde durch einen unerwarteten Fehler abgebrochen. Prüfen Sie, ob dieses Protokoll geleert wurde. {1}</value></data>
   <data name="Clear_WaitBeforeClosing" xml:space="preserve"><value>Es werden noch Protokolle geleert. Schließen Sie das Fenster, sobald das Leeren abgeschlossen ist.</value></data>
+  <data name="Search_ToolTip" xml:space="preserve"><value>Durchsucht Meldungen, Quellen, Computer und IDs. Verwenden Sie „Anführungszeichen“ für exakte Ausdrücke und -Wort zum Ausschließen.</value></data>
+  <data name="Time_Custom" xml:space="preserve"><value>Zeitraum wählen…</value></data>
+  <data name="Time_CustomTitle" xml:space="preserve"><value>Nach Datum und Uhrzeit filtern</value></data>
+  <data name="Time_From" xml:space="preserve"><value>Von</value></data>
+  <data name="Time_To" xml:space="preserve"><value>Bis</value></data>
+  <data name="Time_Apply" xml:space="preserve"><value>Anwenden</value></data>
+  <data name="Time_RangeInvalid" xml:space="preserve"><value>Enddatum und -uhrzeit dürfen nicht vor dem Beginn liegen.</value></data>
+  <data name="Filter_Reset" xml:space="preserve"><value>Filter zurücksetzen</value></data>
+  <data name="Filter_ResetTip" xml:space="preserve"><value>Suche, Ereignis-IDs, Zeitraum, Quellen- und Ebenenfilter zurücksetzen</value></data>
+  <data name="Filter_SourceOnly" xml:space="preserve"><value>Quelle: {0}</value></data>
+  <data name="Filter_SourceHiddenOne" xml:space="preserve"><value>Ausgeblendete Quelle: {0}</value></data>
+  <data name="Filter_SourceHiddenMany" xml:space="preserve"><value>{0} Quellen ausgeblendet</value></data>
+  <data name="Tree_SearchPlaceholder" xml:space="preserve"><value>Protokolle filtern</value></data>
+  <data name="Tree_OverviewRange" xml:space="preserve"><value>Probleme in allen Protokollen ({0})</value></data>
+  <data name="Overview_WindowMenu" xml:space="preserve"><value>Zeitraum der Übersicht</value></data>
+  <data name="Overview_1h" xml:space="preserve"><value>1 Std.</value></data>
+  <data name="Overview_24h" xml:space="preserve"><value>24 Std.</value></data>
+  <data name="Overview_7d" xml:space="preserve"><value>7 Tage</value></data>
+  <data name="Overview_30d" xml:space="preserve"><value>30 Tage</value></data>
+  <data name="Column_Log" xml:space="preserve"><value>Protokoll</value></data>
+  <data name="Detail_Data" xml:space="preserve"><value>Ereignisdaten</value></data>
+  <data name="Detail_NoData" xml:space="preserve"><value>Dieses Ereignis enthält keine strukturierten Datenfelder.</value></data>
+  <data name="Detail_CopyAll" xml:space="preserve"><value>Alle Details kopieren</value></data>
+  <data name="Detail_CopyMessage" xml:space="preserve"><value>Meldung kopieren</value></data>
+  <data name="Detail_CopyXml" xml:space="preserve"><value>XML kopieren</value></data>
+  <data name="Menu_OnlySource" xml:space="preserve"><value>Nur Quelle „{0}“ anzeigen</value></data>
+  <data name="Menu_HideSource" xml:space="preserve"><value>Quelle „{0}“ ausblenden</value></data>
+  <data name="Menu_CloseFile" xml:space="preserve"><value>Aus Liste entfernen</value></data>
+  <data name="Clear_RecoveryTitle" xml:space="preserve"><value>Sicherungen geleerter Protokolle lokal behalten</value></data>
+  <data name="Clear_RecoveryBody" xml:space="preserve"><value>Mindestens ein Protokoll wurde geleert, aber die Sicherung konnte nicht an das gewählte Ziel verschoben werden. Diese temporären Dateien sind die einzigen verbliebenen Kopien:</value></data>
+  <data name="Clear_RecoveryCopy" xml:space="preserve"><value>Pfade kopieren</value></data>
+  <data name="Clear_RecoveryOpenFolder" xml:space="preserve"><value>Ordner öffnen</value></data>
+  <data name="Clear_RecoveryClose" xml:space="preserve"><value>Schließen</value></data>
+  <data name="Drop_OpenEvtx" xml:space="preserve"><value>.evtx-Datei öffnen</value></data>
 </root>

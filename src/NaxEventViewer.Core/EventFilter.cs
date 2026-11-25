@@ -6,29 +6,72 @@ namespace NaxEventViewer.Core;
 /// <summary>Which events the list shows. Filtering runs on the events already in memory, so it is instant.</summary>
 public sealed class EventFilter
 {
+    private string _rawText = "";
     private string[] _terms = [];
+    private string[] _excludedTerms = [];
 
     /// <summary>The levels to show, or null for all.</summary>
     public IReadOnlySet<EventLevelKind>? Levels { get; init; }
 
     public EventIdFilter? EventIds { get; init; }
 
-    /// <summary>Only events at or after this time, or null for any time.</summary>
+    /// <summary>Only events at or after this time, or null for no lower bound.</summary>
     public DateTime? SinceUtc { get; init; }
 
-    /// <summary>Words that must all appear in the message, source, task category, log or event ID, ignoring case.</summary>
-    public string Text
+    /// <summary>Only events at or before this time, or null for no upper bound.</summary>
+    public DateTime? UntilUtc { get; init; }
+
+    private HashSet<string>? _includedSources;
+    private HashSet<string>? _excludedSources;
+
+    /// <summary>Sources to include (case-insensitive), or null for all.</summary>
+    public IReadOnlySet<string>? IncludedSources
     {
-        get => string.Join(' ', _terms);
-        init => _terms = value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        get => _includedSources;
+        init => _includedSources = value is null ? null : new HashSet<string>(value, StringComparer.OrdinalIgnoreCase);
     }
 
-    public bool HasText => _terms.Length > 0;
+    /// <summary>Sources to exclude (case-insensitive), or null for none.</summary>
+    public IReadOnlySet<string>? ExcludedSources
+    {
+        get => _excludedSources;
+        init => _excludedSources = value is null ? null : new HashSet<string>(value, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Words and quoted phrases that must appear (or, with a leading hyphen, must not appear) in the message, source,
+    /// task category, log, computer, or event ID, ignoring case.
+    /// </summary>
+    public string Text
+    {
+        get => _rawText;
+        init
+        {
+            _rawText = value ?? "";
+            (_terms, _excludedTerms) = ParseTerms(_rawText);
+        }
+    }
+
+    public bool HasText => _terms.Length > 0 || _excludedTerms.Length > 0;
 
     public static EventFilter All { get; } = new();
 
     /// <summary>A copy of this filter with another start time, used to move a "last hour" window along with the clock.</summary>
-    public EventFilter WithSince(DateTime? sinceUtc) => new() { Levels = Levels, EventIds = EventIds, SinceUtc = sinceUtc, _terms = _terms };
+    public EventFilter WithSince(DateTime? sinceUtc) => WithTimeRange(sinceUtc, UntilUtc);
+
+    /// <summary>A copy of this filter with a new time range, keeping all other filter parts and resetting cached line matches.</summary>
+    public EventFilter WithTimeRange(DateTime? sinceUtc, DateTime? untilUtc) => new()
+    {
+        Levels = Levels,
+        EventIds = EventIds,
+        SinceUtc = sinceUtc,
+        UntilUtc = untilUtc,
+        IncludedSources = IncludedSources,
+        ExcludedSources = ExcludedSources,
+        _rawText = _rawText,
+        _terms = _terms,
+        _excludedTerms = _excludedTerms,
+    };
 
     public bool Matches(EventItem item) => MatchesExceptLevel(item) && (Levels is null || Levels.Contains(item.Kind));
 
@@ -36,23 +79,84 @@ public sealed class EventFilter
     public bool MatchesExceptLevel(EventItem item)
     {
         if (SinceUtc is DateTime since && item.TimeCreatedUtc < since) return false;
+        if (UntilUtc is DateTime until && item.TimeCreatedUtc > until) return false;
+        if (IncludedSources is { Count: > 0 } && !IncludedSources.Contains(item.Provider)) return false;
+        if (ExcludedSources is { Count: > 0 } && ExcludedSources.Contains(item.Provider)) return false;
         if (EventIds is not null && !EventIds.Matches(item.EventId)) return false;
         foreach (string term in _terms)
         {
-            if (!Contains(item.Provider, term) && !Contains(item.TaskName, term) && !Contains(item.Channel, term)
-                && !Contains(item.EventIdText, term) && !MessageContains(item, term))
-                return false;
+            if (!ItemMatchesTerm(item, term)) return false;
+        }
+        foreach (string excluded in _excludedTerms)
+        {
+            if (ItemMatchesTerm(item, excluded)) return false;
         }
         return true;
     }
 
-    // A search word never contains white space, so it can never span two lines; checking line by line is exact.
+    private bool ItemMatchesTerm(EventItem item, string term) =>
+        Contains(item.Provider, term)
+        || Contains(item.TaskName, term)
+        || Contains(item.Channel, term)
+        || Contains(item.Computer, term)
+        || Contains(item.EventIdText, term)
+        || MessageContains(item, term);
+
+    /// <summary>
+    /// Splits search text into required terms and excluded terms (leading hyphen), honoring quoted phrases such as
+    /// "access denied" and -"access denied". A standalone hyphen is searched literally.
+    /// </summary>
+    internal static (string[] Include, string[] Exclude) ParseTerms(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return ([], []);
+        var include = new List<string>();
+        var exclude = new List<string>();
+        int i = 0;
+        while (i < text.Length)
+        {
+            while (i < text.Length && char.IsWhiteSpace(text[i])) i++;
+            if (i >= text.Length) break;
+
+            bool isExclude = false;
+            if (text[i] == '-' && i + 1 < text.Length && !char.IsWhiteSpace(text[i + 1]))
+            {
+                isExclude = true;
+                i++;
+            }
+
+            string token;
+            if (text[i] == '"')
+            {
+                i++;
+                int start = i;
+                while (i < text.Length && text[i] != '"') i++;
+                token = text[start..i];
+                if (i < text.Length && text[i] == '"') i++;
+            }
+            else
+            {
+                int start = i;
+                while (i < text.Length && !char.IsWhiteSpace(text[i])) i++;
+                token = text[start..i];
+            }
+
+            if (token.Length > 0) (isExclude ? exclude : include).Add(token);
+        }
+        return (include.ToArray(), exclude.ToArray());
+    }
+
+    // A single-line search term can never span two lines; checking line by line is exact. Terms containing a line break
+    // fall back to checking the joined message so stored and plain messages always agree.
     private readonly ConcurrentDictionary<(MessageStore Store, string Term), LineMatches> _lineMatches = new();
+
+    /// <summary>Drops cached per-store line match tables so an old MessageStore can be collected without swapping the filter reference.</summary>
+    public void ClearLineCache() => _lineMatches.Clear();
 
     private bool MessageContains(EventItem item, string term)
     {
         if (item.PlainMessage is { } plain) return Contains(plain, term);
         if (item.StoredLines is not var (store, lines)) return false;
+        if (term.Contains('\n')) return Contains(store.Join(lines), term);
         return _lineMatches.GetOrAdd((store, term), static _ => new LineMatches()).AnyMatch(store, term, lines);
     }
 
@@ -198,6 +302,7 @@ public enum SortColumn
 {
     Level,
     Time,
+    Log,
     Source,
     EventId,
     Task,
@@ -224,6 +329,7 @@ public sealed class EventComparer(SortColumn column, bool descending) : ICompare
         int result = Column switch
         {
             SortColumn.Level => Severity(x.Kind).CompareTo(Severity(y.Kind)),
+            SortColumn.Log => string.Compare(x.LogDisplayName, y.LogDisplayName, StringComparison.CurrentCultureIgnoreCase),
             SortColumn.Source => string.Compare(x.Provider, y.Provider, StringComparison.CurrentCultureIgnoreCase),
             SortColumn.EventId => x.EventId.CompareTo(y.EventId),
             SortColumn.Task => string.Compare(xTask, yTask, StringComparison.CurrentCultureIgnoreCase),

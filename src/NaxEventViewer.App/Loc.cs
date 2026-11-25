@@ -32,6 +32,8 @@ internal static class Loc
             CultureInfo culture = CultureInfo.GetCultureInfo(tag);
             CultureInfo.DefaultThreadCurrentUICulture = culture;
             CultureInfo.CurrentUICulture = culture;
+            CultureInfo.DefaultThreadCurrentCulture = culture;
+            CultureInfo.CurrentCulture = culture;
         }
     }
 

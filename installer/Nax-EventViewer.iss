@@ -137,6 +137,7 @@ end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   CrashLog: String;
+  FindRec: TFindRec;
 begin
   // The uninstall is now certain to go ahead: restore the Windows Event Viewer before any file is removed. Only a
   // replacement that points to this installation is removed; one that another program set up is left alone.
@@ -152,9 +153,20 @@ begin
 
   if (CurUninstallStep = usPostUninstall) and DirExists(DataFolder) then
   begin
-    // The settings always go. A silent uninstall removes the crash log as well, so nothing is left behind.
+    // The settings and any interrupted settings save temporary files always go.
     DeleteFile(DataFolder + '\settings.json');
     DeleteFile(DataFolder + '\settings.json.tmp');
+    if FindFirst(DataFolder + '\settings.json.*.tmp', FindRec) then
+    begin
+      try
+        repeat
+          if (FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) = 0 then
+            DeleteFile(DataFolder + '\' + FindRec.Name);
+        until not FindNext(FindRec);
+      finally
+        FindClose(FindRec);
+      end;
+    end;
     CrashLog := DataFolder + '\crash.log';
     if FileExists(CrashLog) and (UninstallSilent or
       (MsgBox(FmtMessage(CustomMessage('CrashLogQuestion'), [CrashLog]), mbConfirmation, MB_YESNO) = IDYES)) then

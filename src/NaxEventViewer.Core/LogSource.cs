@@ -80,7 +80,8 @@ public sealed class LogSource
     internal static IReadOnlyList<string> BuildOverviewQueries(IReadOnlyList<string> channels, TimeSpan window)
     {
         long milliseconds = Math.Max(1, (long)window.TotalMilliseconds);
-        string filter = "*[System[(Level=1 or Level=2 or Level=3) and TimeCreated[timediff(@SystemTime) &lt;= "
+        // Include Critical (1), Error (2), Warning (3), and Security Audit Failure (Level 0 with Audit Failure keyword).
+        string filter = "*[System[(Level=1 or Level=2 or Level=3 or (Level=0 and band(Keywords,4503599627370496))) and TimeCreated[timediff(@SystemTime) &lt;= "
             + milliseconds.ToString(CultureInfo.InvariantCulture) + "]]]";
 
         var queries = new List<string>();

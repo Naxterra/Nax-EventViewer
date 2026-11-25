@@ -22,6 +22,13 @@ internal static class ExportTests
                 Check.Equal("'@x", EventExport.CsvCell("@x"));
             });
 
+        yield return ("csv_cell_starting_with_newline_gets_apostrophe",
+            "Event text that starts with a line feed before a formula gets a leading apostrophe and is quoted so spreadsheets never run it.",
+            () =>
+            {
+                Check.Equal("\"'\n'=HYPERLINK(1)\"", EventExport.CsvCell("\n=HYPERLINK(1)"));
+            });
+
         yield return ("csv_formula_after_semicolon_tab_or_line_break_gets_apostrophe",
             "Event text with a formula after a semicolon, tab or line break gets an apostrophe before that formula and is quoted, so Excel set to the semicolon separator never runs it either.",
             () =>
